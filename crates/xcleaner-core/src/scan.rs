@@ -245,6 +245,8 @@ pub fn discover(layout: &Layout) -> Vec<Item> {
             .flat_map(|i| i.targets.iter().map(|(p, _)| p.clone()))
             .collect()
     };
+    let evidence = crate::leftovers::Evidence::from_system(&layout.home);
+    let leftovers = crate::leftovers::leftover_items(layout, &evidence);
     let mut items = static_items(layout);
     items.extend(crate::extra::steam_items(layout));
     items.extend(crate::extra::discord_items(layout));
@@ -254,6 +256,18 @@ pub fn discover(layout: &Layout) -> Vec<Item> {
     items.extend(cachedir_tag_items(layout, &c));
     let c = covered(&items);
     items.extend(crate::extra::cache_rest_items(layout, &c));
+    // A cache item inside a leftover belongs to an app that is gone: the
+    // leftover entry covers it, so do not count the same bytes twice.
+    let gone: Vec<PathBuf> = leftovers
+        .iter()
+        .flat_map(|i| i.targets.iter().map(|(p, _)| p.clone()))
+        .collect();
+    items.retain(|i| {
+        !i.targets
+            .iter()
+            .all(|(p, _)| gone.iter().any(|g| p.starts_with(g)))
+    });
+    items.extend(leftovers);
     // Hard deny-list: drop any target a rule should never have produced.
     for it in &mut items {
         it.targets
@@ -463,7 +477,9 @@ mod tests {
             app_item.targets,
             vec![(PathBuf::from(".config/someapp/Cache"), Action::ClearDir)]
         );
-        assert!(!items.iter().any(|i| i.id.contains("back-ovfs")));
+        assert!(!items
+            .iter()
+            .any(|i| i.id.starts_with("chromium-app:") && i.id.contains("back-ovfs")));
         assert!(items.iter().any(|i| i.id == "cachedir-tag:build-target"));
         assert!(!items.iter().any(|i| i.id == "cachedir-tag:untagged"));
 

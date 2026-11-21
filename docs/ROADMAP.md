@@ -37,10 +37,23 @@ maszyny, a UPSTREAM-CLEANERS opisuje BleachBit, czkawka, kondo, CCleaner i inne.
   zepsuty link. Na tej maszynie: 7, m.in. osu-wine, BeatSaberModManager, stare XUninstaller.
 - [x] `xcleaner --scan --details`: ścieżki i uzasadnienia.
 
-## v0.0.3 — pozostałości po odinstalowanych aplikacjach (priorytet właściciela)
-- [ ] Wykrywanie resztek w `~/.config`, `~/.local/share`, `~/.local/state`, `~/.var/app`
-  i dotdirach: dowody z pacman.log, bazy pacmana, plików .desktop i Flatpaka.
-  Projekt: research/LEFTOVERS-DETECTION-2026-11.md.
+## v0.0.3 — pozostałości po odinstalowanych aplikacjach (zrobione)
+- [x] `leftovers.rs`: `~/.config`, `~/.local/share`, `~/.local/state`, `~/.var/app`.
+  Pozycja trafia na listę tylko wtedy, gdy zgadzają się 3 fakty:
+  - nazwa odpowiada pakietowi usuniętemu według pacman.log;
+  - nic zainstalowanego nie używa tej nazwy;
+  - katalog nie powstał po usunięciu pakietu.
+- [x] Dowody: baza pacmana (nazwy, provides, binarki, .desktop, /opt, /etc/xdg), PATH,
+  pliki .desktop (z pominięciem martwych), Flatpak, procesy.
+- [x] Poziomy: „pewne” (katalog utworzony 0–30 min po instalacji) i „prawie pewne”.
+  Nigdy nie są zaznaczane z góry. Ostrzeżenie, gdy w środku są dane osobiste.
+- [x] Lista wspólnych nazw (gtk, dconf, pulse, systemd…) zawsze wygrywa. Kopie psd `*-back-ovfs.base`.
+- [x] Na tej maszynie: 20 pozycji, ok. 9,8 GB. Zgodne z ręczną analizą, a fałszywy
+  alarm „Discord Key Storage” jest odrzucany.
+- [ ] Później:
+  - dopasowania po pierwszym członie nazwy (evolution-data-server → evolution);
+  - aliasy z `pacman -Fl`, rekordy XUninstaller, dotdiry `~/.<nazwa>`;
+  - decyzja właściciela o zaznaczaniu pozycji „pewnych” bez danych osobistych.
 
 ## v0.0.4 — średnie
 - [ ] Okno szczegółów pozycji: lista ścieżek z rozmiarami, otwórz w menedżerze plików.
