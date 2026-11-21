@@ -20,26 +20,35 @@ maszyny, a UPSTREAM-CLEANERS opisuje BleachBit, czkawka, kondo, CCleaner i inne.
 - [x] GUI: skan → lista z kategoriami → jedno potwierdzenie → czyszczenie.
 - [x] `xcleaner --scan`: raport w terminalu, nic nie usuwa.
 
-## v0.0.2 — małe reguły (z researchu)
-- [ ] Steam: `logs`, `dumps`, `appcache/httpcache`, `steamapps/shadercache/<id>`
-  (niskie ryzyko, guard: steam). Według researchu CS2 ma tu 11 GB, a Deadlock 6.6 GB.
-- [ ] Cache launcherów: `PrismLauncher/cache` (2.8 GB), `bedrock-on-linux/cache`.
-- [ ] Discord: stare `app-1.0.*` po aktualizacji i `discord_asset_cache`.
-- [ ] Logi Electron (`logs/`) i Crashpad: osobna pozycja „logi”.
-- [ ] Twarda lista „nigdy”, wymuszona testem: `.ssh`, `.gnupg`, keyringi,
-  katalogi XDG użytkownika, Steam `userdata`/`config`, `.local/bin`, `.claude`.
-- [ ] Osierocone pliki `.desktop` i zepsute symlinki w `~/.local/share/applications`
-  i `~/.local/bin`.
+## v0.0.2 — małe reguły (zrobione)
+- [x] Steam:
+  - shadery per gra, z nazwą z appmanifest (CS2 10,9 GB, Deadlock 6,5 GB);
+  - osierocone shadery po odinstalowanych grach (zaznaczone);
+  - logi i zrzuty, cache sklepu.
+- [x] Cache launcherów: `PrismLauncher/cache` (2,7 GB), `bedrock-on-linux/cache` (843 MB).
+- [x] Discord: stare `app-1.0.*` i `1.0.*` po auto-aktualizacji (zostaje najnowsza).
+- [x] Logi Electron (`logs/`), Crashpad, `Service Worker/CacheStorage`.
+- [x] Reszta `~/.cache`: każda pozycja osobno i zaznaczona.
+  - Katalogi z muzyką lub filmami są automatycznie oznaczane „do przejrzenia” (`music-opus`).
+- [x] Twarda lista „nigdy” (`protect.rs`), sprawdzana przy wykrywaniu i przed usunięciem,
+  pilnowana testami (`.ssh`, keyringi, Steam `userdata`/`compatdata`, `.local/bin`,
+  katalogi najwyższego poziomu HOME).
+- [x] Martwe skróty `.desktop`: brak programu, brak Flatpaka, brak prefiksu Wine,
+  zepsuty link. Na tej maszynie: 7, m.in. osu-wine, BeatSaberModManager, stare XUninstaller.
+- [x] `xcleaner --scan --details`: ścieżki i uzasadnienia.
 
-## v0.0.3 — średnie
+## v0.0.3 — pozostałości po odinstalowanych aplikacjach (priorytet właściciela)
+- [ ] Wykrywanie resztek w `~/.config`, `~/.local/share`, `~/.local/state`, `~/.var/app`
+  i dotdirach: dowody z pacman.log, bazy pacmana, plików .desktop i Flatpaka.
+  Projekt: research/LEFTOVERS-DETECTION-2026-11.md.
+
+## v0.0.4 — średnie
 - [ ] Okno szczegółów pozycji: lista ścieżek z rozmiarami, otwórz w menedżerze plików.
 - [ ] Dziennik „Zdarzenia”: co i ile usunięto, błędy, eksport .md (jak w XU).
 - [ ] Flatpak: `~/.var/app/*/cache`.
-- [ ] Pozostałości po odinstalowanych aplikacjach (profil `discord`, `chromium`,
-  `*-back-ovfs.base`): pozycje „do przejrzenia”, nigdy nie zaznaczane z góry.
 - [ ] Lista wyjątków użytkownika („nie ruszaj tego”).
 
-## v0.0.4 — duże
+## v0.0.5 — duże
 - [ ] Artefakty budowania projektów w stylu kondo/npkill:
   - `target/` (CACHEDIR.TAG), `node_modules`, `.venv`, `build/`;
   - filtr wieku („nieużywane od 30 dni”);

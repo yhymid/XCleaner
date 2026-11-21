@@ -95,6 +95,8 @@ pub enum Action {
     ClearDirKeep(&'static [&'static str]),
     /// Delete one regular file.
     RemoveFile,
+    /// Delete the directory together with everything in it.
+    RemoveDir,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -293,6 +295,26 @@ pub static RULES: &[Rule] = &[
         guards: &["go"],
     },
     Rule {
+        id: "prism-cache",
+        name: "Prism Launcher — pobrane pliki",
+        description: "Cache pobranych wersji Minecrafta, bibliotek i modów. Instancje i światy zostają.",
+        category: Category::Games,
+        risk: Risk::Low,
+        regen: Regen::Slow,
+        targets: &[dir(Data, "PrismLauncher/cache")],
+        guards: &["prismlauncher"],
+    },
+    Rule {
+        id: "bedrock-cache",
+        name: "Minecraft Bedrock (bedrock-on-linux) — cache",
+        description: "Pobrane pliki launchera Bedrock. Światy zostają.",
+        category: Category::Games,
+        risk: Risk::Low,
+        regen: Regen::Slow,
+        targets: &[dir(Data, "bedrock-on-linux/cache")],
+        guards: &["mcpelauncher-client", "mcpelauncher-ui-qt", "bedrock-on-linux"],
+    },
+    Rule {
         id: "trash",
         name: "Kosz",
         description: "Pliki przeniesione do kosza. Po wyczyszczeniu nie da się ich przywrócić.",
@@ -332,6 +354,7 @@ pub const CHROMIUM_CACHE_DIRS: &[&str] = &[
     "CachedData",
     "Crashpad/completed",
     "Crashpad/pending",
+    "logs",
 ];
 
 /// A rule resolved against the real HOME (static or discovered).
@@ -348,6 +371,8 @@ pub struct Item {
     pub guards: Vec<String>,
     /// Chromium SingletonLock to check for a live owner.
     pub singleton_lock: Option<PathBuf>,
+    /// Re-rate as Review when the measured content is mostly audio/video.
+    pub media_check: bool,
 }
 
 impl Item {
@@ -368,6 +393,27 @@ mod tests {
             assert!(ids.insert(r.id), "duplicate id {}", r.id);
             for t in r.targets {
                 assert!(!t.rel.is_empty() && !t.rel.starts_with('/') && !t.rel.contains(".."));
+            }
+        }
+    }
+
+    #[test]
+    fn no_rule_targets_a_protected_path() {
+        for r in RULES {
+            for t in r.targets {
+                let base = match t.base {
+                    Base::Home => "",
+                    Base::Cache => ".cache/",
+                    Base::Config => ".config/",
+                    Base::Data => ".local/share/",
+                };
+                let p = format!("{base}{}", t.rel);
+                assert_eq!(
+                    crate::protect::refusal(std::path::Path::new(&p)),
+                    None,
+                    "{}: {p}",
+                    r.id
+                );
             }
         }
     }

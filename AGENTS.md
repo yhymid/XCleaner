@@ -5,8 +5,12 @@ Read README, docs/ROADMAP.md and docs/research/ first.
 ## Owner decisions (binding)
 - Polish UI; code, commits and docs may be English.
 - Precise over aggressive: every rule names exact paths. Never offer a whole top-level
-  dir (`~/.config`, `~/.local`, `~/.cache`, Steam root). A path in `~/.cache` is NOT
-  automatically junk (real example: `~/.cache/music-opus` = 8.5 GB of music).
+  dir (`~/.config`, `~/.local`, `~/.cache`, Steam root) — enforced by `protect.rs`.
+- Owner 2026-11-22: `~/.cache` can be cleaned practically whole — every top-level entry is
+  its own preselected item, EXCEPT mostly-media dirs (auto re-rated to Review, real example
+  `~/.cache/music-opus` = 8.5 GB music) and known stateful ones (`CACHE_STATEFUL`).
+- Owner 2026-11-22: leftovers of uninstalled apps in `~/.config` / `~/.local` must be found
+  (uninstallers always leave remnants) — design in docs/research/LEFTOVERS-DETECTION-2026-11.md.
 - Only `Risk::Safe` items are preselected. Trash, history, personal data, prefixes and
   leftover profiles are never preselected.
 - Deletion is permanent (no quarantine); the confirmation dialog says so.

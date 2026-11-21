@@ -11,9 +11,9 @@ fn main() -> std::process::ExitCode {
             println!("XCleaner {}", env!("CARGO_PKG_VERSION"));
             std::process::ExitCode::SUCCESS
         }
-        Some("--scan") => cli_scan(),
+        Some("--scan") => cli_scan(args.iter().any(|a| a == "--details")),
         Some("--help") | Some("-h") => {
-            println!("XCleaner {}\n\n  xcleaner          okno programu\n  xcleaner --scan   raport w terminalu (nic nie usuwa)", env!("CARGO_PKG_VERSION"));
+            println!("XCleaner {}\n\n  xcleaner          okno programu\n  xcleaner --scan [--details]   raport w terminalu (nic nie usuwa)", env!("CARGO_PKG_VERSION"));
             std::process::ExitCode::SUCCESS
         }
         _ => {
@@ -28,7 +28,7 @@ fn main() -> std::process::ExitCode {
     }
 }
 
-fn cli_scan() -> std::process::ExitCode {
+fn cli_scan(details: bool) -> std::process::ExitCode {
     let Some(layout) = scan::Layout::from_env() else {
         eprintln!("Brak poprawnego HOME");
         return std::process::ExitCode::FAILURE;
@@ -57,6 +57,14 @@ fn cli_scan() -> std::process::ExitCode {
             f.item.risk.label(),
             f.item.regen.label()
         );
+        if details {
+            for l in f.item.description.lines() {
+                println!("               │ {l}");
+            }
+            for (t, _) in &f.item.targets {
+                println!("               · ~/{}", t.display());
+            }
+        }
         if let Some(b) = &f.blocked {
             println!("               └ {b}");
         }

@@ -39,6 +39,8 @@ pub struct Usage {
     pub bytes: u64,
     pub files: u64,
     pub dirs: u64,
+    /// Bytes in audio/video files (music in a "cache" is user data).
+    pub media_bytes: u64,
 }
 
 impl Usage {
@@ -46,7 +48,28 @@ impl Usage {
         self.bytes += other.bytes;
         self.files += other.files;
         self.dirs += other.dirs;
+        self.media_bytes += other.media_bytes;
     }
+
+    /// More than half of the space is audio/video.
+    pub fn mostly_media(&self) -> bool {
+        self.bytes > 0 && self.media_bytes * 2 > self.bytes
+    }
+}
+
+const MEDIA_EXT: &[&str] = &[
+    "mp3", "opus", "ogg", "oga", "flac", "m4a", "aac", "wav", "wma", "mp4", "mkv", "webm", "avi",
+    "mov", "m4v",
+];
+
+fn is_media(name: &[u8]) -> bool {
+    let Some(dot) = name.iter().rposition(|b| *b == b'.') else {
+        return false;
+    };
+    let ext = &name[dot + 1..];
+    MEDIA_EXT
+        .iter()
+        .any(|m| m.as_bytes().eq_ignore_ascii_case(ext))
 }
 
 #[derive(Debug, Clone, Default)]
@@ -213,6 +236,9 @@ impl Home {
         } else {
             usage.bytes = st.st_blocks as u64 * 512;
             usage.files = 1;
+            if rel.file_name().is_some_and(|n| is_media(n.as_bytes())) {
+                usage.media_bytes = usage.bytes;
+            }
         }
         Ok(Some(usage))
     }
@@ -239,6 +265,52 @@ impl Home {
         }
         let mut rep = DeleteReport::default();
         clear_contents(fd.as_raw_fd(), st.st_dev, self.uid, 0, keep, &mut rep);
+        Ok(rep)
+    }
+
+    /// Delete a whole directory tree including the directory itself.
+    pub fn remove_dir(&self, rel: &Path) -> io::Result<DeleteReport> {
+        let parent = rel
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .ok_or_else(|| {
+                io::Error::new(io::ErrorKind::InvalidInput, "directory directly in HOME")
+            })?;
+        let name = rel
+            .file_name()
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "no directory name"))?;
+        let pfd = self.open_target(
+            parent,
+            libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW,
+        )?;
+        let cname = cstr(name.as_bytes())?;
+        let st = match fstatat(pfd.as_raw_fd(), &cname) {
+            Ok(st) => st,
+            Err(e) if e.raw_os_error() == Some(libc::ENOENT) => return Ok(DeleteReport::default()),
+            Err(e) => return Err(e),
+        };
+        let pst = fstat(pfd.as_raw_fd())?;
+        if !is_dir(&st) || st.st_uid != self.uid || st.st_dev != pst.st_dev {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "not a user-owned directory",
+            ));
+        }
+        let child = open_child_dir(pfd.as_raw_fd(), &cname)?;
+        let cst = fstat(child.as_raw_fd())?;
+        if cst.st_ino != st.st_ino || cst.st_dev != st.st_dev {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "directory changed during check",
+            ));
+        }
+        let mut rep = DeleteReport::default();
+        if clear_contents(child.as_raw_fd(), st.st_dev, self.uid, 0, &[], &mut rep) {
+            drop(child);
+            unlink(pfd.as_raw_fd(), &cname, true)?;
+            rep.freed.bytes += st.st_blocks as u64 * 512;
+            rep.freed.dirs += 1;
+        }
         Ok(rep)
     }
 
@@ -317,8 +389,12 @@ fn measure_dir(
         if st.st_nlink > 1 && !seen.insert((st.st_dev, st.st_ino)) {
             continue;
         }
-        usage.bytes += st.st_blocks as u64 * 512;
+        let b = st.st_blocks as u64 * 512;
+        usage.bytes += b;
         usage.files += 1;
+        if is_media(name.to_bytes()) {
+            usage.media_bytes += b;
+        }
     }
 }
 
@@ -490,6 +566,38 @@ mod tests {
             .unwrap();
         assert!(yay.join("vcs.json").exists());
         assert!(!yay.join("pkg").exists());
+        fs::remove_dir_all(&home).unwrap();
+    }
+
+    #[test]
+    fn remove_dir_deletes_tree_and_dir() {
+        let home = tmp("rmdir");
+        let old = home.join(".config/discord/app-1.0.1");
+        fs::create_dir_all(old.join("modules")).unwrap();
+        fs::write(old.join("modules/x.node"), b"x").unwrap();
+        let h = Home::open(&home).unwrap();
+        let rep = h
+            .remove_dir(Path::new(".config/discord/app-1.0.1"))
+            .unwrap();
+        assert!(rep.errors.is_empty());
+        assert!(!old.exists());
+        assert!(home.join(".config/discord").is_dir());
+        fs::remove_dir_all(&home).unwrap();
+    }
+
+    #[test]
+    fn counts_media_bytes() {
+        let home = tmp("media");
+        let m = home.join(".cache/music");
+        fs::create_dir_all(&m).unwrap();
+        fs::write(m.join("song.OPUS"), vec![0u8; 64 * 1024]).unwrap();
+        fs::write(m.join("index.db"), b"x").unwrap();
+        let u = Home::open(&home)
+            .unwrap()
+            .measure(Path::new(".cache/music"))
+            .unwrap()
+            .unwrap();
+        assert!(u.mostly_media(), "{u:?}");
         fs::remove_dir_all(&home).unwrap();
     }
 

@@ -102,6 +102,7 @@ fn static_items(layout: &Layout) -> Vec<Item> {
                 targets,
                 guards: r.guards.iter().map(|s| s.to_string()).collect(),
                 singleton_lock: None,
+                media_check: false,
             })
         })
         .collect()
@@ -171,6 +172,7 @@ fn chromium_items(layout: &Layout) -> Vec<Item> {
             targets,
             guards,
             singleton_lock: Some(rel.join("SingletonLock")),
+            media_check: false,
         });
     }
     items
@@ -229,6 +231,7 @@ fn cachedir_tag_items(layout: &Layout, covered: &[PathBuf]) -> Vec<Item> {
             targets: vec![(rel, Action::ClearDir)],
             guards: Vec::new(),
             singleton_lock: None,
+            media_check: true,
         });
     }
     items
@@ -236,13 +239,27 @@ fn cachedir_tag_items(layout: &Layout, covered: &[PathBuf]) -> Vec<Item> {
 
 /// All candidate items for this HOME (not yet measured).
 pub fn discover(layout: &Layout) -> Vec<Item> {
+    let covered = |items: &[Item]| -> Vec<PathBuf> {
+        items
+            .iter()
+            .flat_map(|i| i.targets.iter().map(|(p, _)| p.clone()))
+            .collect()
+    };
     let mut items = static_items(layout);
-    let covered: Vec<PathBuf> = items
-        .iter()
-        .flat_map(|i| i.targets.iter().map(|(p, _)| p.clone()))
-        .collect();
+    items.extend(crate::extra::steam_items(layout));
+    items.extend(crate::extra::discord_items(layout));
     items.extend(chromium_items(layout));
-    items.extend(cachedir_tag_items(layout, &covered));
+    items.extend(crate::extra::dead_launcher_items(layout));
+    let c = covered(&items);
+    items.extend(cachedir_tag_items(layout, &c));
+    let c = covered(&items);
+    items.extend(crate::extra::cache_rest_items(layout, &c));
+    // Hard deny-list: drop any target a rule should never have produced.
+    for it in &mut items {
+        it.targets
+            .retain(|(p, _)| crate::protect::refusal(p).is_none());
+    }
+    items.retain(|i| !i.targets.is_empty());
     items
 }
 
@@ -337,6 +354,11 @@ pub fn scan(layout: &Layout) -> std::io::Result<ScanResult> {
     found.retain(|f| f.usage.files > 0 || !f.errors.is_empty());
     for f in &mut found {
         f.blocked = blocked_reason(&f.item, &procs, &layout.home);
+        if f.item.media_check && f.usage.mostly_media() {
+            f.item.risk = Risk::Review;
+            f.item.regen = Regen::Never;
+            f.item.description = "Głównie muzyka lub filmy — to raczej Twoje pliki, nie śmieci. Sprawdź przed usunięciem.".into();
+        }
     }
     Ok(ScanResult {
         found,
@@ -364,10 +386,16 @@ pub fn clean(layout: &Layout, items: &[Item]) -> std::io::Result<CleanReport> {
             continue;
         }
         for (rel, action) in &item.targets {
+            if let Some(why) = crate::protect::refusal(rel) {
+                rep.errors
+                    .push(format!("{}: odmowa — {why}", rel.display()));
+                continue;
+            }
             let r: std::io::Result<DeleteReport> = match action {
                 Action::ClearDir => home.clear_dir(rel),
                 Action::ClearDirKeep(keep) => home.clear_dir_keep(rel, keep),
                 Action::RemoveFile => home.remove_file(rel),
+                Action::RemoveDir => home.remove_dir(rel),
             };
             match r {
                 Ok(d) => {
