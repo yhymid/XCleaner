@@ -688,9 +688,9 @@ pub enum Tier {
 impl Tier {
     pub fn label(self) -> &'static str {
         match self {
-            Tier::Exact => "pewne",
-            Tier::Strong => "prawie pewne",
-            Tier::Review => "możliwe",
+            Tier::Exact => tr!("certain", "pewne"),
+            Tier::Strong => tr!("almost certain", "prawie pewne"),
+            Tier::Review => tr!("possible", "możliwe"),
         }
     }
 }
@@ -752,7 +752,8 @@ pub fn judge(name: &str, birth: Option<i64>, ev: &Evidence) -> Option<Verdict> {
         }
         return Some(Verdict {
             tier: Tier::Review,
-            why: format!(
+            why: trf!(
+                "the name matches the start of the removed package {} ({})",
                 "nazwa pasuje do początku usuniętego pakietu {} ({})",
                 r.package,
                 format_date(r.removed_at)
@@ -765,7 +766,8 @@ pub fn judge(name: &str, birth: Option<i64>, ev: &Evidence) -> Option<Verdict> {
             return None;
         }
     }
-    let removed = format!(
+    let removed = trf!(
+        "package {} was removed on {}",
         "pakiet {} usunięto {}",
         r.package,
         format_date(r.removed_at)
@@ -773,7 +775,8 @@ pub fn judge(name: &str, birth: Option<i64>, ev: &Evidence) -> Option<Verdict> {
     match (birth, r.installed_at) {
         (Some(b), Some(i)) if b >= i - 5 && b <= i + 1800 => Some(Verdict {
             tier: Tier::Exact,
-            why: format!(
+            why: trf!(
+                "{removed}; the directory appeared {} s after the package was installed",
                 "{removed}; katalog powstał {} s po instalacji pakietu",
                 b - i
             ),
@@ -821,7 +824,7 @@ fn personal_markers(p: &Path) -> Vec<String> {
                 } else if !is_dir {
                     if let Some(ext) = name.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()) {
                         if PERSONAL_EXT.contains(&ext.as_str()) {
-                            let m = format!("pliki .{ext}");
+                            let m = trf!(".{ext} files", "pliki .{ext}");
                             if !found.contains(&m) {
                                 found.push(m);
                             }
@@ -903,7 +906,11 @@ pub fn leftover_items(layout: &Layout, ev: &Evidence) -> Vec<Item> {
                             &name,
                             "~/.config",
                             Tier::Strong,
-                            "kopia zapasowa profilu po usuniętym profile-sync-daemon".into(),
+                            tr!(
+                                "profile backup left by the removed profile-sync-daemon",
+                                "kopia zapasowa profilu po usuniętym profile-sync-daemon"
+                            )
+                            .into(),
                             &e.path(),
                             Action::RemoveDir,
                         ));
@@ -924,7 +931,11 @@ pub fn leftover_items(layout: &Layout, ev: &Evidence) -> Vec<Item> {
                     &id,
                     "~/.var/app",
                     Tier::Exact,
-                    "aplikacja Flatpak nie jest zainstalowana".into(),
+                    tr!(
+                        "the Flatpak app is not installed",
+                        "aplikacja Flatpak nie jest zainstalowana"
+                    )
+                    .into(),
                     &e.path(),
                     Action::RemoveDir,
                 ));
@@ -949,9 +960,14 @@ fn leftover_item(
     } else {
         Vec::new()
     };
-    let mut description = format!("{}: {why}. Program nie jest zainstalowany.", tier.label());
+    let mut description = trf!(
+        "{}: {why}. The program is not installed.",
+        "{}: {why}. Program nie jest zainstalowany.",
+        tier.label()
+    );
     if !markers.is_empty() {
-        description.push_str(&format!(
+        description.push_str(&trf!(
+            "\nCareful: your data may be in here ({}).",
             "\nUwaga: mogą tu być Twoje dane ({}).",
             markers.join(", ")
         ));
@@ -1096,7 +1112,7 @@ mod tests {
         fs::create_dir_all(d.join("venv/bin")).unwrap();
         let m = personal_markers(&d);
         assert!(
-            m.contains(&"BSInstances".to_string()) && m.contains(&"pliki .exe".to_string()),
+            m.contains(&"BSInstances".to_string()) && m.contains(&".exe files".to_string()),
             "{m:?}"
         );
         let clean = d.join("venv");

@@ -89,7 +89,12 @@ fn err_last() -> io::Error {
 }
 
 fn cstr(bytes: &[u8]) -> io::Result<CString> {
-    CString::new(bytes).map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "NUL in path"))
+    CString::new(bytes).map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            tr!("NUL in path", "NUL w ścieżce"),
+        )
+    })
 }
 
 /// Relative path with only normal components.
@@ -97,7 +102,10 @@ fn checked_rel(rel: &Path) -> io::Result<CString> {
     if rel.as_os_str().is_empty() || rel.components().any(|c| !matches!(c, Component::Normal(_))) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            "target must be a plain path below HOME",
+            tr!(
+                "target must be a plain path below HOME",
+                "cel musi być zwykłą ścieżką w HOME"
+            ),
         ));
     }
     cstr(rel.as_os_str().as_bytes())
@@ -241,7 +249,10 @@ impl Home {
                 self.open_target(rel, libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW)?;
             let dst = fstat(dir.as_raw_fd())?;
             if dst.st_ino != st.st_ino || dst.st_dev != st.st_dev {
-                return Err(io::Error::other("directory changed during measuring"));
+                return Err(io::Error::other(tr!(
+                    "directory changed during measuring",
+                    "katalog zmienił się podczas liczenia"
+                )));
             }
             let mut seen = HashSet::new();
             measure_dir(dir.as_raw_fd(), st.st_dev, 0, &mut seen, &mut usage);
@@ -272,7 +283,10 @@ impl Home {
         if st.st_uid != self.uid {
             return Err(io::Error::new(
                 io::ErrorKind::PermissionDenied,
-                "target owned by another user",
+                tr!(
+                    "target owned by another user",
+                    "cel należy do innego użytkownika"
+                ),
             ));
         }
         let mut rep = DeleteReport::default();
@@ -282,9 +296,12 @@ impl Home {
 
     /// Delete a whole directory tree including the directory itself.
     pub fn remove_dir(&self, rel: &Path) -> io::Result<DeleteReport> {
-        let name = rel
-            .file_name()
-            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "no directory name"))?;
+        let name = rel.file_name().ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                tr!("no directory name", "brak nazwy katalogu"),
+            )
+        })?;
         let opened;
         // A direct child of the base uses the base's O_PATH descriptor,
         // which is a valid dirfd for fstatat/openat/unlinkat.
@@ -311,7 +328,10 @@ impl Home {
         if !is_dir(&st) || st.st_uid != self.uid || st.st_dev != pst.st_dev {
             return Err(io::Error::new(
                 io::ErrorKind::PermissionDenied,
-                "not a user-owned directory",
+                tr!(
+                    "not a user-owned directory",
+                    "katalog nie należy do użytkownika"
+                ),
             ));
         }
         let child = open_child_dir(pfd, &cname)?;
@@ -319,7 +339,10 @@ impl Home {
         if cst.st_ino != st.st_ino || cst.st_dev != st.st_dev {
             return Err(io::Error::new(
                 io::ErrorKind::PermissionDenied,
-                "directory changed during check",
+                tr!(
+                    "directory changed during check",
+                    "katalog zmienił się podczas sprawdzania"
+                ),
             ));
         }
         let mut rep = DeleteReport::default();
@@ -335,9 +358,12 @@ impl Home {
     /// Delete one regular file or symlink (never a directory).
     pub fn remove_file(&self, rel: &Path) -> io::Result<DeleteReport> {
         let parent = rel.parent().filter(|p| !p.as_os_str().is_empty());
-        let name = rel
-            .file_name()
-            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "no file name"))?;
+        let name = rel.file_name().ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                tr!("no file name", "brak nazwy pliku"),
+            )
+        })?;
         let opened;
         let pfd = match parent {
             Some(p) => {
@@ -358,7 +384,7 @@ impl Home {
         if is_dir(&st) || st.st_uid != self.uid {
             return Err(io::Error::new(
                 io::ErrorKind::PermissionDenied,
-                "not a user-owned file",
+                tr!("not a user-owned file", "plik nie należy do użytkownika"),
             ));
         }
         unlink(pfd, &cname, false)?;

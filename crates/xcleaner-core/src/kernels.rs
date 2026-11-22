@@ -167,7 +167,8 @@ pub fn probe() -> Option<(u64, u64, String)> {
                 (
                     0,
                     (v.len() - limit) as u64,
-                    format!(
+                    trf!(
+                        "{} kernels with a limit of {limit} (dnf remove --oldinstallonly)",
                         "{} kerneli przy limicie {limit} (dnf remove --oldinstallonly)",
                         v.len()
                     ),
@@ -181,7 +182,11 @@ pub fn probe() -> Option<(u64, u64, String)> {
                 (
                     0,
                     (v.len() - 3) as u64,
-                    format!("{} kerneli (zypper purge-kernels)", v.len()),
+                    trf!(
+                        "{} kernels (zypper purge-kernels)",
+                        "{} kerneli (zypper purge-kernels)",
+                        v.len()
+                    ),
                 )
             })
         }
@@ -195,17 +200,27 @@ fn run(bin: &str, args: &[&str]) -> Result<(), String> {
         .status()
     {
         Ok(s) if s.success() => Ok(()),
-        Ok(s) => Err(format!("{bin}: kod {}", s.code().unwrap_or(-1))),
+        Ok(s) => Err(trf!(
+            "{bin}: code {}",
+            "{bin}: kod {}",
+            s.code().unwrap_or(-1)
+        )),
         Err(e) => Err(format!("{bin}: {e}")),
     }
 }
 
 pub fn root_clean() -> (u64, Vec<String>) {
-    crate::root::say("• Stare kernele (menedżer pakietów)…");
+    crate::root::say(tr!(
+        "• Old kernels (package manager)…",
+        "• Stare kernele (menedżer pakietów)…"
+    ));
     if let Some(pm) = crate::locks::busy_package_manager() {
         return (
             0,
-            vec![format!("działa menedżer pakietów: {pm} — pominięto")],
+            vec![trf!(
+                "a package manager is running: {pm} — skipped",
+                "działa menedżer pakietów: {pm} — pominięto"
+            )],
         );
     }
     match backend() {
@@ -222,7 +237,8 @@ pub fn root_clean() -> (u64, Vec<String>) {
             if plan.as_ref() != Some(&pkgs) {
                 return (
                     0,
-                    vec![format!(
+                    vec![trf!(
+                        "apt wants to remove more than the old kernels ({}) — stopped",
                         "apt chce usunąć więcej niż stare kernele ({}) — przerwano",
                         plan.map(|p| p.into_iter().collect::<Vec<_>>().join(", "))
                             .unwrap_or_default()

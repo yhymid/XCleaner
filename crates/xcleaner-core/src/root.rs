@@ -268,7 +268,7 @@ fn package_names(files: &[String], max: usize) -> String {
     let more = names.len().saturating_sub(max);
     let mut s = names.into_iter().take(max).collect::<Vec<_>>().join(", ");
     if more > 0 {
-        s.push_str(&format!(" … i {more} więcej"));
+        s.push_str(&trf!(" … and {more} more", " … i {more} więcej"));
     }
     s
 }
@@ -295,7 +295,8 @@ fn probe_pacman_cache_all() -> Option<Probe> {
         task: RootTask::PacmanCacheAll,
         bytes,
         files: n,
-        detail: format!(
+        detail: trf!(
+            "{n} packages: {}",
             "{n} paczek: {}",
             package_names(&paccache_list(&["-d", "-k0"]), 8)
         ),
@@ -316,7 +317,8 @@ fn probe_pacman_cache() -> Option<Probe> {
         detail: {
             let mut files = paccache_list(&["-d", "-k2"]);
             files.extend(paccache_list(&["-d", "-uk0"]));
-            format!(
+            trf!(
+                "{} of older versions, {} of uninstalled packages: {}",
                 "{} starszych wersji, {} po odinstalowanych pakietach: {}",
                 crate::format_size(old),
                 crate::format_size(removed),
@@ -518,12 +520,19 @@ fn probe_pacman_downloads() -> Option<Probe> {
         task: RootTask::PacmanDownloads,
         bytes: 0,
         files: dirs.len() as u64,
-        detail: format!("{} katalogów", dirs.len()),
+        detail: crate::i18n::count(
+            dirs.len() as u64,
+            ["directory", "directories"],
+            ["katalog", "katalogi", "katalogów"],
+        ),
     })
 }
 
 fn root_pacman_downloads() -> (u64, Vec<String>) {
-    say("• Puste katalogi po przerwanych pobraniach pacmana…");
+    say(tr!(
+        "• Empty directories left by interrupted pacman downloads…",
+        "• Puste katalogi po przerwanych pobraniach pacmana…"
+    ));
     let dirs = stale_download_dirs();
     let mut removed = 0;
     let mut freed = 0;
@@ -554,11 +563,15 @@ fn root_pacman_downloads() -> (u64, Vec<String>) {
                     errs.push(format!("{d}: {}", io::Error::last_os_error()));
                 }
             }
-            Ok(None) => say(&format!("  {d}: pominięto (świeży albo nie tylko pliki)")),
+            Ok(None) => say(&trf!(
+                "  {d}: skipped (recent, or not only files)",
+                "  {d}: pominięto (świeży albo nie tylko pliki)"
+            )),
             Err(e) => errs.push(format!("{d}: {e}")),
         }
     }
-    say(&format!(
+    say(&trf!(
+        "  removed {removed} of {} directories, freed {}",
         "  usunięto {removed} z {} katalogów, zwolniono {}",
         dirs.len(),
         crate::format_size(freed)
@@ -655,11 +668,17 @@ fn probe_unused_sync_dbs() -> Option<Probe> {
 }
 
 fn root_unused_sync_dbs() -> (u64, Vec<String>) {
-    say("• Bazy repozytoriów usuniętych z pacman.conf…");
+    say(tr!(
+        "• Databases of repositories removed from pacman.conf…",
+        "• Bazy repozytoriów usuniętych z pacman.conf…"
+    ));
     if let Some(pm) = crate::locks::busy_package_manager() {
         return (
             0,
-            vec![format!("działa menedżer pakietów: {pm} — pominięto")],
+            vec![trf!(
+                "a package manager is running: {pm} — skipped",
+                "działa menedżer pakietów: {pm} — pominięto"
+            )],
         );
     }
     let mut freed = 0;
@@ -745,7 +764,7 @@ fn open_report(path: &Path, uid: u32) -> io::Result<fs::File> {
     if !m.is_file() || m.uid() != uid || m.nlink() != 1 {
         return Err(io::Error::new(
             io::ErrorKind::PermissionDenied,
-            "niezaufany plik raportu",
+            tr!("untrusted report file", "niezaufany plik raportu"),
         ));
     }
     f.set_len(0)?;
@@ -767,16 +786,23 @@ fn invoking_uid(arg: Option<u32>) -> Result<u32, String> {
     let doas = std::env::var("DOAS_USER")
         .ok()
         .and_then(|n| uid_of_user(&n));
-    let uid = arg
-        .or(sudo)
-        .or(doas)
-        .ok_or("brak --uid — uruchom z programu XCleaner")?;
+    let uid = arg.or(sudo).or(doas).ok_or(tr!(
+        "missing --uid — start it from the XCleaner window",
+        "brak --uid — uruchom z programu XCleaner"
+    ))?;
     if uid == 0 {
-        return Err("--uid 0: raport musi należeć do zwykłego użytkownika".into());
+        return Err(tr!(
+            "--uid 0: the report must belong to a regular user",
+            "--uid 0: raport musi należeć do zwykłego użytkownika"
+        )
+        .into());
     }
     for (src, v) in [("SUDO_UID", sudo), ("DOAS_USER", doas)] {
         if v.is_some_and(|v| v != uid) {
-            return Err(format!("--uid {uid} nie zgadza się z {src}"));
+            return Err(trf!(
+                "--uid {uid} does not match {src}",
+                "--uid {uid} nie zgadza się z {src}"
+            ));
         }
     }
     Ok(uid)
@@ -790,8 +816,22 @@ fn uid_of_user(name: &str) -> Option<u32> {
 
 /// Entry point of `--root-clean`. Returns the process exit code.
 pub fn run_root(args: &[String]) -> i32 {
+    // The GUI passes its language; root's HOME has no settings of the user.
+    if let Some(l) = args
+        .windows(2)
+        .find(|w| w[0] == "--lang")
+        .and_then(|w| crate::i18n::Lang::parse(&w[1]))
+    {
+        crate::i18n::set(l);
+    }
     if unsafe { libc::geteuid() } != 0 {
-        eprintln!("--root-clean wymaga uprawnień roota (sudo, doas albo su)");
+        eprintln!(
+            "{}",
+            tr!(
+                "--root-clean needs root (sudo, doas or su)",
+                "--root-clean wymaga uprawnień roota (sudo, doas albo su)"
+            )
+        );
         return 2;
     }
     let mut report_path = None;
@@ -802,18 +842,24 @@ pub fn run_root(args: &[String]) -> i32 {
         match a.as_str() {
             "--report" => report_path = it.next().map(PathBuf::from),
             "--uid" => uid_arg = it.next().and_then(|u| u.parse().ok()),
+            "--lang" => {
+                it.next();
+            }
             other => match RootTask::from_arg(other) {
                 Some(t) if !tasks.contains(&t) => tasks.push(t),
                 Some(_) => {}
                 None => {
-                    eprintln!("nieznane zadanie: {other}");
+                    eprintln!(
+                        "{}",
+                        trf!("unknown task: {other}", "nieznane zadanie: {other}")
+                    );
                     return 2;
                 }
             },
         }
     }
     let Some(report_path) = report_path else {
-        eprintln!("brak --report");
+        eprintln!("{}", tr!("missing --report", "brak --report"));
         return 2;
     };
     let uid = match invoking_uid(uid_arg) {
@@ -826,18 +872,22 @@ pub fn run_root(args: &[String]) -> i32 {
     let mut report = match open_report(&report_path, uid) {
         Ok(f) => Report { file: f },
         Err(e) => {
-            eprintln!("raport: {e}");
+            eprintln!("{}", trf!("report: {e}", "raport: {e}"));
             return 2;
         }
     };
-    say("XCleaner — czyszczenie systemu (root)\n");
+    say(tr!(
+        "XCleaner — system cleaning (root)\n",
+        "XCleaner — czyszczenie systemu (root)\n"
+    ));
     let mut errors = 0;
     let immutable = immutable_root();
     for t in tasks {
         let (freed, errs) = match t {
             t if immutable.is_some() && t.touches_system_image() => (
                 0,
-                vec![format!(
+                vec![trf!(
+                    "the system is immutable ({}) — skipped",
                     "system {} jest niezmienny — pominięto",
                     immutable.unwrap_or_default()
                 )],
@@ -861,23 +911,29 @@ pub fn run_root(args: &[String]) -> i32 {
         report.line("freed", t, &freed.to_string());
         for e in &errs {
             report.line("error", t, e);
-            say(&format!("  błąd: {e}"));
+            say(&trf!("  error: {e}", "  błąd: {e}"));
         }
         errors += errs.len();
     }
     let _ = writeln!(report.file, "done");
     if errors > 0 {
-        say("\nWystąpiły błędy (szczegóły w oknie XCleaner). Naciśnij Enter, aby zamknąć.");
+        say(tr!(
+            "\nThere were errors (details in the XCleaner window). Press Enter to close.",
+            "\nWystąpiły błędy (szczegóły w oknie XCleaner). Naciśnij Enter, aby zamknąć."
+        ));
         let _ = io::stdin().lock().read_line(&mut String::new());
     } else {
-        say("\nGotowe.");
+        say(tr!("\nDone.", "\nGotowe."));
         std::thread::sleep(Duration::from_millis(800));
     }
     0
 }
 
 fn root_coredumps() -> (u64, Vec<String>) {
-    say("• Zrzuty awarii (coredumpy)…");
+    say(tr!(
+        "• Crash dumps (coredumps)…",
+        "• Zrzuty awarii (coredumpy)…"
+    ));
     let base = match Home::open(Path::new(COREDUMP_DIR)) {
         Ok(b) => b,
         Err(e) => return (0, vec![format!("{COREDUMP_DIR}: {e}")]),
@@ -890,7 +946,11 @@ fn root_coredumps() -> (u64, Vec<String>) {
             Err(e) => errs.push(format!("{name}: {e}")),
         }
     }
-    say(&format!("  zwolniono {}", crate::format_size(freed)));
+    say(&trf!(
+        "  freed {}",
+        "  zwolniono {}",
+        crate::format_size(freed)
+    ));
     (freed, errs)
 }
 
@@ -900,11 +960,18 @@ fn root_paccache(runs: &[&[&str]]) -> (u64, Vec<String>) {
     if let Some(pm) = crate::locks::busy_package_manager() {
         return (
             0,
-            vec![format!("działa menedżer pakietów: {pm} — pominięto")],
+            vec![trf!(
+                "a package manager is running: {pm} — skipped",
+                "działa menedżer pakietów: {pm} — pominięto"
+            )],
         );
     }
     for args in runs {
-        say(&format!("• Cache pacmana: paccache {}…", args.join(" ")));
+        say(&trf!(
+            "• pacman cache: paccache {}…",
+            "• Cache pacmana: paccache {}…",
+            args.join(" ")
+        ));
         match crate::host_command(PACCACHE)
             .args(*args)
             .env("LC_ALL", "C")
@@ -926,12 +993,19 @@ fn root_paccache(runs: &[&[&str]]) -> (u64, Vec<String>) {
             Err(e) => errs.push(format!("paccache: {e}")),
         }
     }
-    say(&format!("  zwolniono {}", crate::format_size(freed)));
+    say(&trf!(
+        "  freed {}",
+        "  zwolniono {}",
+        crate::format_size(freed)
+    ));
     (freed, errs)
 }
 
 fn root_modules() -> (u64, Vec<String>) {
-    say("• Moduły po usuniętych kernelach…");
+    say(tr!(
+        "• Modules of removed kernels…",
+        "• Moduły po usuniętych kernelach…"
+    ));
     let base = match Home::open(Path::new(MODULES_DIR)) {
         Ok(b) => b,
         Err(e) => return (0, vec![format!("{MODULES_DIR}: {e}")]),
@@ -949,7 +1023,11 @@ fn root_modules() -> (u64, Vec<String>) {
             Err(e) => errs.push(format!("{d}: {e}")),
         }
     }
-    say(&format!("  zwolniono {}", crate::format_size(freed)));
+    say(&trf!(
+        "  freed {}",
+        "  zwolniono {}",
+        crate::format_size(freed)
+    ));
     (freed, errs)
 }
 
@@ -999,8 +1077,11 @@ pub fn parse_report(text: &str) -> RootOutcome {
     }
     if !done {
         o.not_done = Some(
-            "czyszczenie systemu nie zostało wykonane (anulowano hasło lub zamknięto terminal)"
-                .into(),
+            tr!(
+                "system cleaning was not done (password cancelled or terminal closed)",
+                "czyszczenie systemu nie zostało wykonane (anulowano hasło lub zamknięto terminal)"
+            )
+            .into(),
         );
     }
     o
@@ -1017,13 +1098,19 @@ pub fn launch(tasks: &[RootTask]) -> RootOutcome {
         ..Default::default()
     };
     let Some(elevate) = crate::term::find_elevate() else {
-        return fail("brak sudo, doas i su");
+        return fail(tr!("no sudo, doas or su", "brak sudo, doas i su"));
     };
     let Some(terminal) = crate::term::find_terminal() else {
-        return fail("nie znaleziono emulatora terminala (np. kitty, foot, konsole)");
+        return fail(tr!(
+            "no terminal emulator found (e.g. kitty, foot, konsole)",
+            "nie znaleziono emulatora terminala (np. kitty, foot, konsole)"
+        ));
     };
     let Some(me) = self_path() else {
-        return fail("nie można ustalić ścieżki programu");
+        return fail(tr!(
+            "cannot determine the program path",
+            "nie można ustalić ścieżki programu"
+        ));
     };
     let runtime = std::env::var_os("XDG_RUNTIME_DIR")
         .map(PathBuf::from)
@@ -1033,7 +1120,7 @@ pub fn launch(tasks: &[RootTask]) -> RootOutcome {
     let status = runtime.join(format!("xcleaner-root-{}.wrap", std::process::id()));
     for f in [&report, &status] {
         if let Err(e) = crate::term::create_private(f) {
-            return fail(&format!("plik raportu: {e}"));
+            return fail(&trf!("report file: {e}", "plik raportu: {e}"));
         }
     }
     let cleanup = || {
@@ -1050,6 +1137,8 @@ pub fn launch(tasks: &[RootTask]) -> RootOutcome {
         uid.to_string().into(),
         "--report".into(),
         report.clone().into(),
+        "--lang".into(),
+        crate::i18n::current().code().into(),
     ];
     root_cmd.extend(tasks.iter().map(|t| OsString::from(t.arg())));
     let mut cmd: Vec<OsString> = vec![
@@ -1067,6 +1156,8 @@ pub fn launch(tasks: &[RootTask]) -> RootOutcome {
     let args = crate::term::terminal_args(&terminal, &title, &cmd);
     let mut child = match crate::host_command(&terminal)
         .args(&args)
+        // The wrapper in the terminal speaks the window's language.
+        .env(crate::i18n::ENV, crate::i18n::current().code())
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -1075,7 +1166,11 @@ pub fn launch(tasks: &[RootTask]) -> RootOutcome {
         Ok(c) => c,
         Err(e) => {
             cleanup();
-            return fail(&format!("terminal {}: {e}", terminal.display()));
+            return fail(&trf!(
+                "terminal {}: {e}",
+                "terminal {}: {e}",
+                terminal.display()
+            ));
         }
     };
     let start = Instant::now();
@@ -1091,7 +1186,8 @@ pub fn launch(tasks: &[RootTask]) -> RootOutcome {
         pid = pid.or(st.pid);
         if let Some(code) = st.exit {
             if code != 0 {
-                gone = Some(format!(
+                gone = Some(trf!(
+                    "system cleaning was not done ({} exited with code {code}: wrong password or cancelled)",
                     "czyszczenie systemu nie zostało wykonane ({} zakończyło się kodem {code}: złe hasło lub anulowano)",
                     elevate.label()
                 ));
@@ -1100,13 +1196,20 @@ pub fn launch(tasks: &[RootTask]) -> RootOutcome {
         }
         match pid {
             Some(p) if !crate::procs::Processes::pid_alive(p) => {
-                gone = Some("czyszczenie systemu przerwane: zamknięto okno terminala".into());
+                gone = Some(
+                    tr!(
+                        "system cleaning interrupted: the terminal window was closed",
+                        "czyszczenie systemu przerwane: zamknięto okno terminala"
+                    )
+                    .into(),
+                );
                 break;
             }
             Some(_) => {}
             None if start.elapsed() > Duration::from_secs(30) => {
                 let _ = child.try_wait();
-                gone = Some(format!(
+                gone = Some(trf!(
+                    "terminal {} did not run the command",
                     "terminal {} nie uruchomił polecenia",
                     terminal.display()
                 ));
@@ -1217,6 +1320,8 @@ mod tests {
             "b-1-1-x86_64.pkg.tar.zst".to_string(),
             "a-2-1-any.pkg.tar.zst".to_string(),
         ];
+        assert_eq!(package_names(&files, 1), "a-2-1-any … and 1 more");
+        crate::i18n::set(crate::i18n::Lang::Pl);
         assert_eq!(package_names(&files, 1), "a-2-1-any … i 1 więcej");
     }
 

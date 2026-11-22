@@ -3,7 +3,10 @@
 Read README, docs/ROADMAP.md and docs/research/ first.
 
 ## Owner decisions (binding)
-- Polish UI; code, commits and docs may be English.
+- UI in English (default) and Polish, switch EN/PL in the window (owner 2026-11-22).
+  Every user-facing text has both: `tr!("en", "pl")`, `trf!("en {x}", "pl {x}")`,
+  `i18n::T::new(en, pl)` in static tables, `i18n::count(n, [en1, enN], [pl1, pl2-4, pl5+])`.
+  Never add a text in one language only. Code, commits and docs are English.
 - Precise over aggressive: every rule names exact paths. Never offer a whole top-level
   dir (`~/.config`, `~/.local`, `~/.cache`, Steam root) — enforced by `protect.rs`.
 - Owner 2026-11-22: `~/.cache` can be cleaned practically whole — every top-level entry is

@@ -109,8 +109,8 @@ fn static_items(layout: &Layout) -> Vec<Item> {
                 .collect();
             (!targets.is_empty()).then(|| Item {
                 id: r.id.to_string(),
-                name: r.name.to_string(),
-                description: r.description.to_string(),
+                name: r.name.get().to_string(),
+                description: r.description.get().to_string(),
                 category: r.category,
                 risk: r.risk,
                 regen: r.regen,
@@ -178,10 +178,12 @@ fn chromium_items(layout: &Layout) -> Vec<Item> {
         let (category, guards) = known_chromium(&name);
         items.push(Item {
             id: format!("chromium-app:{name}"),
-            name: format!("{name} — pamięć podręczna"),
-            description:
+            name: trf!("{name} — cache", "{name} — pamięć podręczna"),
+            description: tr!(
+                "Cache of pages, code and GPU shaders. Logins, settings and messages stay.",
                 "Cache stron, kodu i shaderów GPU. Logowanie, ustawienia i wiadomości zostają."
-                    .into(),
+            )
+            .into(),
             category,
             risk: Risk::Safe,
             regen: Regen::Same,
@@ -240,8 +242,12 @@ fn cachedir_tag_items(layout: &Layout, covered: &[PathBuf]) -> Vec<Item> {
         }
         items.push(Item {
             id: format!("cachedir-tag:{name}"),
-            name: format!("{name} (oznaczony jako cache)"),
-            description: "Katalog ma znacznik CACHEDIR.TAG — program sam zadeklarował, że to zbędna pamięć podręczna.".into(),
+            name: trf!("{name} (marked as cache)", "{name} (oznaczony jako cache)"),
+            description: tr!(
+                "The directory has a CACHEDIR.TAG marker — the program itself declared it a disposable cache.",
+                "Katalog ma znacznik CACHEDIR.TAG — program sam zadeklarował, że to zbędna pamięć podręczna."
+            )
+            .into(),
             category: Category::Development,
             risk: Risk::Low,
             regen: Regen::Slow,
@@ -315,11 +321,20 @@ fn singleton_owner_alive(home: &Path, lock: &Path) -> bool {
 fn blocked_reason(item: &Item, procs: &Processes, home: &Path) -> Option<String> {
     let guards: Vec<&str> = item.guards.iter().map(String::as_str).collect();
     if let Some(g) = procs.first_running(&guards) {
-        return Some(format!("działa {g} — zamknij program i skanuj ponownie"));
+        return Some(trf!(
+            "{g} is running — close it and scan again",
+            "działa {g} — zamknij program i skanuj ponownie"
+        ));
     }
     if let Some(lock) = &item.singleton_lock {
         if singleton_owner_alive(home, lock) {
-            return Some("aplikacja jest uruchomiona — zamknij ją i skanuj ponownie".into());
+            return Some(
+                tr!(
+                    "the app is running — close it and scan again",
+                    "aplikacja jest uruchomiona — zamknij ją i skanuj ponownie"
+                )
+                .into(),
+            );
         }
     }
     None
@@ -365,92 +380,92 @@ fn root_found() -> Vec<Found> {
             let (id, name, desc, regen) = match p.task {
                 RootTask::Coredumps => (
                     "root:coredumps",
-                    "Zrzuty awarii programów (coredumpy)",
-                    format!("/var/lib/systemd/coredump — {}. Potrzebne tylko do zgłaszania błędów.", p.detail),
+                    tr!("Crash dumps of programs (coredumps)", "Zrzuty awarii programów (coredumpy)"),
+                    trf!("/var/lib/systemd/coredump — {}. Only needed for bug reports.", "/var/lib/systemd/coredump — {}. Potrzebne tylko do zgłaszania błędów.", p.detail),
                     Regen::Never,
                 ),
                 RootTask::PacmanCache => (
                     "root:pacman-cache",
-                    "Cache pacmana (stare wersje paczek)",
-                    format!("paccache -rk2: zostają 2 ostatnie wersje każdej paczki (downgrade dalej możliwy) — {}.", p.detail),
+                    tr!("pacman cache (old package versions)", "Cache pacmana (stare wersje paczek)"),
+                    trf!("paccache -rk2: the last 2 versions of each package stay (downgrade still possible) — {}.", "paccache -rk2: zostają 2 ostatnie wersje każdej paczki (downgrade dalej możliwy) — {}.", p.detail),
                     Regen::Never,
                 ),
                 RootTask::PacmanCacheAll => (
                     "root:pacman-cache-all",
-                    "Cache pacmana — także aktualne wersje",
-                    format!("paccache -rk0 ({}): usuwa wszystkie pobrane paczki. Bez internetu nie da się ich wtedy przeinstalować ani cofnąć aktualizacji z cache.", p.detail),
+                    tr!("pacman cache — current versions too", "Cache pacmana — także aktualne wersje"),
+                    trf!("paccache -rk0 ({}): removes all downloaded packages. Without internet you cannot reinstall them or roll back an update from the cache.", "paccache -rk0 ({}): usuwa wszystkie pobrane paczki. Bez internetu nie da się ich wtedy przeinstalować ani cofnąć aktualizacji z cache.", p.detail),
                     Regen::Slow,
                 ),
                 RootTask::PacmanDownloads => (
                     "root:pacman-downloads",
-                    "Katalogi po przerwanych pobraniach pacmana",
-                    format!("/var/cache/pacman/pkg/download-* ({}). Pacman zostawia je po przerwanej aktualizacji, a `pacman -Sc` potrafi się na nich wywalić. Usuwane: puste, albo starsze niż doba i zawierające same porzucone pliki.", p.detail),
+                    tr!("Directories left by interrupted pacman downloads", "Katalogi po przerwanych pobraniach pacmana"),
+                    trf!("/var/cache/pacman/pkg/download-* ({}). pacman leaves them after an interrupted update, and `pacman -Sc` can fail on them. Removed: empty ones, or ones older than a day holding only abandoned files.", "/var/cache/pacman/pkg/download-* ({}). Pacman zostawia je po przerwanej aktualizacji, a `pacman -Sc` potrafi się na nich wywalić. Usuwane: puste, albo starsze niż doba i zawierające same porzucone pliki.", p.detail),
                     Regen::Never,
                 ),
                 RootTask::UnusedSyncDbs => (
                     "root:unused-sync-dbs",
-                    "Bazy repozytoriów usuniętych z pacman.conf",
-                    format!("/var/lib/pacman/sync: {} — to samo co część `pacman -Sc`.", p.detail),
+                    tr!("Databases of repositories removed from pacman.conf", "Bazy repozytoriów usuniętych z pacman.conf"),
+                    trf!("/var/lib/pacman/sync: {} — the same as part of `pacman -Sc`.", "/var/lib/pacman/sync: {} — to samo co część `pacman -Sc`.", p.detail),
                     Regen::Never,
                 ),
                 RootTask::JournalVacuum => (
                     "root:journal-vacuum",
-                    "Stare wpisy dziennika systemd",
-                    format!("journalctl --vacuum-time=4weeks: {} (/var/log/journal). Bieżący dziennik i ostatnie 4 tygodnie zostają.", p.detail),
+                    tr!("Old systemd journal entries", "Stare wpisy dziennika systemd"),
+                    trf!("journalctl --vacuum-time=4weeks: {} (/var/log/journal). The current journal and the last 4 weeks stay.", "journalctl --vacuum-time=4weeks: {} (/var/log/journal). Bieżący dziennik i ostatnie 4 tygodnie zostają.", p.detail),
                     Regen::Never,
                 ),
                 RootTask::RotatedLogs => (
                     "root:rotated-logs",
-                    "Stare, zrotowane logi w /var/log",
-                    format!("{}. Tylko poprzednie wersje logów (*.1, *.gz z numerem, *-RRRRMMDD, *.old); aktywne logi, audit i historia logowań zostają.", p.detail),
+                    tr!("Old rotated logs in /var/log", "Stare, zrotowane logi w /var/log"),
+                    trf!("{}. Only previous log versions (*.1, numbered *.gz, *-YYYYMMDD, *.old); active logs, audit and login history stay.", "{}. Tylko poprzednie wersje logów (*.1, *.gz z numerem, *-RRRRMMDD, *.old); aktywne logi, audit i historia logowań zostają.", p.detail),
                     Regen::Never,
                 ),
                 RootTask::FlatpakUnused => (
                     "root:flatpak-unused",
-                    "Nieużywane runtime’y Flatpak",
-                    format!("flatpak uninstall --unused: {}. Żadna zainstalowana aplikacja ich nie używa; rozmiar przybliżony.", p.detail),
+                    tr!("Unused Flatpak runtimes", "Nieużywane runtime’y Flatpak"),
+                    trf!("flatpak uninstall --unused: {}. No installed app uses them; the size is approximate.", "flatpak uninstall --unused: {}. Żadna zainstalowana aplikacja ich nie używa; rozmiar przybliżony.", p.detail),
                     Regen::Never,
                 ),
                 RootTask::PkgCache => (
                     "root:pkg-cache",
-                    "Cache menedżera pakietów",
-                    format!("{} — przez własną komendę menedżera (apt-get autoclean, dnf clean packages, zypper clean…). Paczki da się pobrać ponownie.", p.detail),
+                    tr!("Package manager cache", "Cache menedżera pakietów"),
+                    trf!("{} — with the manager's own command (apt-get autoclean, dnf clean packages, zypper clean…). Packages can be downloaded again.", "{} — przez własną komendę menedżera (apt-get autoclean, dnf clean packages, zypper clean…). Paczki da się pobrać ponownie.", p.detail),
                     Regen::Never,
                 ),
                 RootTask::AptClean => (
                     "root:apt-clean",
-                    "Cache apt — wszystkie pobrane paczki",
-                    format!("apt-get clean ({}): usuwa wszystkie pobrane .deb. Bez internetu nie da się ich wtedy przeinstalować z cache.", p.detail),
+                    tr!("apt cache — all downloaded packages", "Cache apt — wszystkie pobrane paczki"),
+                    trf!("apt-get clean ({}): removes all downloaded .deb files. Without internet you cannot reinstall them from the cache.", "apt-get clean ({}): usuwa wszystkie pobrane .deb. Bez internetu nie da się ich wtedy przeinstalować z cache.", p.detail),
                     Regen::Slow,
                 ),
                 RootTask::CrashReports => (
                     "root:crash-reports",
-                    "Raporty awarii (apport / ABRT)",
-                    format!("{}. Potrzebne tylko do zgłaszania błędów; zrzuty kdump po panice kernela zostają.", p.detail),
+                    tr!("Crash reports (apport / ABRT)", "Raporty awarii (apport / ABRT)"),
+                    trf!("{}. Only needed for bug reports; kdump dumps after a kernel panic stay.", "{}. Potrzebne tylko do zgłaszania błędów; zrzuty kdump po panice kernela zostają.", p.detail),
                     Regen::Never,
                 ),
                 RootTask::SnapDisabled => (
                     "root:snap-disabled",
-                    "Wyłączone (stare) rewizje Snap",
-                    format!("{}. snapd trzyma je dla snap revert; aktualne rewizje zostają.", p.detail),
+                    tr!("Disabled (old) Snap revisions", "Wyłączone (stare) rewizje Snap"),
+                    trf!("{}. snapd keeps them for snap revert; current revisions stay.", "{}. snapd trzyma je dla snap revert; aktualne rewizje zostają.", p.detail),
                     Regen::Never,
                 ),
                 RootTask::OstreeCleanup => (
                     "root:ostree-cleanup",
-                    "rpm-ostree: pozostałości operacji",
-                    format!("rpm-ostree cleanup -b -m: {}. Wdrożenie do cofnięcia (rollback) zostaje.", p.detail),
+                    tr!("rpm-ostree: leftovers of operations", "rpm-ostree: pozostałości operacji"),
+                    trf!("rpm-ostree cleanup -b -m: {}. The rollback deployment stays.", "rpm-ostree cleanup -b -m: {}. Wdrożenie do cofnięcia (rollback) zostaje.", p.detail),
                     Regen::Never,
                 ),
                 RootTask::OldKernels => (
                     "root:old-kernels",
-                    "Stare kernele",
-                    format!("{}. Usuwane wyłącznie menedżerem pakietów (hooki zaktualizują bootloader); działający kernel zostaje. Sprawdź listę przed usunięciem.", p.detail),
+                    tr!("Old kernels", "Stare kernele"),
+                    trf!("{}. Removed only with the package manager (hooks update the bootloader); the running kernel stays. Check the list before removing.", "{}. Usuwane wyłącznie menedżerem pakietów (hooki zaktualizują bootloader); działający kernel zostaje. Sprawdź listę przed usunięciem.", p.detail),
                     Regen::Never,
                 ),
                 RootTask::KernelModules => (
                     "root:kernel-modules",
-                    "Moduły po usuniętych kernelach",
-                    format!("/usr/lib/modules: {} — żaden pakiet ich nie posiada, działający kernel nie jest ruszany.", p.detail),
+                    tr!("Modules of removed kernels", "Moduły po usuniętych kernelach"),
+                    trf!("/usr/lib/modules: {} — no package owns them; the running kernel is not touched.", "/usr/lib/modules: {} — żaden pakiet ich nie posiada, działający kernel nie jest ruszany.", p.detail),
                     Regen::Never,
                 ),
             };
@@ -545,7 +560,8 @@ pub fn scan(layout: &Layout) -> std::io::Result<ScanResult> {
             f.item.preselect = false;
         }
         if f.usage.shared_bytes * 10 > f.usage.bytes {
-            f.item.description.push_str(&format!(
+            f.item.description.push_str(&trf!(
+                "\nHard links: {} is shared with other places — less will actually be freed.",
                 "\nTwarde linki: {} jest współdzielone z innymi miejscami — realnie zwolni się mniej.",
                 crate::format_size(f.usage.shared_bytes)
             ));
@@ -553,7 +569,11 @@ pub fn scan(layout: &Layout) -> std::io::Result<ScanResult> {
         if f.item.media_check && f.usage.mostly_media() {
             f.item.risk = Risk::Review;
             f.item.regen = Regen::Never;
-            f.item.description = "Głównie muzyka lub filmy — to raczej Twoje pliki, nie śmieci. Sprawdź przed usunięciem.".into();
+            f.item.description = tr!(
+                "Mostly music or videos — these are probably your files, not junk. Check before removing.",
+                "Głównie muzyka lub filmy — to raczej Twoje pliki, nie śmieci. Sprawdź przed usunięciem."
+            )
+            .into();
         }
     }
     Ok(ScanResult {
@@ -593,8 +613,11 @@ pub fn clean(layout: &Layout, items: &[Item]) -> std::io::Result<CleanReport> {
                 continue;
             }
             if let Some(why) = layout.refusal(rel) {
-                rep.errors
-                    .push(format!("{}: odmowa — {why}", rel.display()));
+                rep.errors.push(trf!(
+                    "{}: refused — {why}",
+                    "{}: odmowa — {why}",
+                    rel.display()
+                ));
                 continue;
             }
             let r: std::io::Result<DeleteReport> = match action {
@@ -630,7 +653,8 @@ pub fn clean(layout: &Layout, items: &[Item]) -> std::io::Result<CleanReport> {
             .iter()
             .map(|(p, a)| crate::rules::target_label(p, a))
             .collect();
-        log.push(format!(
+        log.push(trf!(
+            "{ts}\t{}\tfreed {}\terrors {}\t{}",
             "{ts}\t{}\tzwolniono {}\tbłędy {}\t{}",
             item.id,
             crate::format_size(rep.freed.bytes - freed_before),
@@ -657,11 +681,12 @@ pub fn clean(layout: &Layout, items: &[Item]) -> std::io::Result<CleanReport> {
             let prefix = format!("{}:", t.arg());
             let errors = o.errors.iter().filter(|e| e.starts_with(&prefix)).count();
             let status = if o.not_done.is_some() {
-                "\tnie wykonano"
+                tr!("\tnot done", "\tnie wykonano")
             } else {
                 ""
             };
-            log.push(format!(
+            log.push(trf!(
+                "{ts}\t{id}\tfreed {}\terrors {errors}\t{} (root){status}",
                 "{ts}\t{id}\tzwolniono {}\tbłędy {errors}\t{} (root){status}",
                 crate::format_size(freed),
                 t.location()
@@ -669,10 +694,10 @@ pub fn clean(layout: &Layout, items: &[Item]) -> std::io::Result<CleanReport> {
         }
     }
     for b in &rep.blocked {
-        log.push(format!("{ts}\tpominięto\t{b}"));
+        log.push(trf!("{ts}\tskipped\t{b}", "{ts}\tpominięto\t{b}"));
     }
     for e in &rep.errors {
-        log.push(format!("{ts}\tbłąd\t{e}"));
+        log.push(trf!("{ts}\terror\t{e}", "{ts}\tbłąd\t{e}"));
     }
     crate::history::append(&log);
     Ok(rep)

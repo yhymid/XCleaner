@@ -1,6 +1,9 @@
 //! XCleaner core: rules, scanning and safe deletion. No GTK here.
 #![cfg(target_os = "linux")]
 
+// First: its tr!/trf! macros are used by every module below.
+#[macro_use]
+pub mod i18n;
 pub mod artifacts;
 pub mod extra;
 pub mod fsops;
@@ -103,7 +106,7 @@ pub fn default_sigpipe() {
     }
 }
 
-/// Human-readable size with binary units (e.g. "1,5 GiB" in Polish style).
+/// Human-readable size with binary units: "1.5 GiB", in Polish "1,5 GiB".
 pub fn format_size(bytes: u64) -> String {
     const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
     let mut v = bytes as f64;
@@ -115,20 +118,13 @@ pub fn format_size(bytes: u64) -> String {
     if u == 0 {
         format!("{bytes} B")
     } else {
-        format!("{:.1} {}", v, UNITS[u]).replace('.', ",")
+        let s = format!("{:.1} {}", v, UNITS[u]);
+        if i18n::is_pl() {
+            s.replace('.', ",")
+        } else {
+            s
+        }
     }
-}
-
-/// Polish plural: pl(n, "plik", "pliki", "plików").
-pub fn pl(n: u64, one: &str, few: &str, many: &str) -> String {
-    let w = if n == 1 {
-        one
-    } else if (2..=4).contains(&(n % 10)) && !(12..=14).contains(&(n % 100)) {
-        few
-    } else {
-        many
-    };
-    format!("{n} {w}")
 }
 
 #[cfg(test)]
@@ -175,10 +171,8 @@ mod tests {
     #[test]
     fn sizes_and_plurals() {
         assert_eq!(format_size(512), "512 B");
+        assert_eq!(format_size(1536), "1.5 KiB");
+        i18n::set(i18n::Lang::Pl);
         assert_eq!(format_size(1536), "1,5 KiB");
-        assert_eq!(pl(1, "plik", "pliki", "plików"), "1 plik");
-        assert_eq!(pl(3, "plik", "pliki", "plików"), "3 pliki");
-        assert_eq!(pl(12, "plik", "pliki", "plików"), "12 plików");
-        assert_eq!(pl(22, "plik", "pliki", "plików"), "22 pliki");
     }
 }

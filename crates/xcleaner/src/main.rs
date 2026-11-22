@@ -2,10 +2,28 @@
 
 mod ui;
 
-use xcleaner_core::{format_size, scan};
+use xcleaner_core::{
+    format_size,
+    i18n::{self, Lang},
+    scan, tr, trf,
+};
 
 fn main() -> std::process::ExitCode {
-    let args: Vec<String> = std::env::args().skip(1).collect();
+    let mut args: Vec<String> = std::env::args().skip(1).collect();
+    // Language: `--lang en|pl` (this run only), else $XCLEANER_LANG, else
+    // the saved choice, else English.
+    let mut lang = i18n::from_env_or_saved();
+    if let Some(i) = args.iter().position(|a| a == "--lang") {
+        match args.get(i + 1).and_then(|v| Lang::parse(v)) {
+            Some(l) => lang = l,
+            None => {
+                eprintln!("--lang: en | pl");
+                return std::process::ExitCode::from(2);
+            }
+        }
+        args.drain(i..i + 2);
+    }
+    i18n::set(lang);
     if args.iter().any(|a| a == "--no-files-db") {
         // Read by xcleaner-core before any thread starts.
         std::env::set_var("XCLEANER_NO_FILES_DB", "1");
@@ -49,13 +67,24 @@ fn main() -> std::process::ExitCode {
             }
         }
         Some("--help") | Some("-h") => {
-            println!("XCleaner {}\n\n  xcleaner          okno programu\n  xcleaner --scan [--details]   raport w terminalu (nic nie usuwa)\n  xcleaner --usage [katalog]    co zajmuje miejsce w HOME (tylko odczyt)\n  --no-files-db                 bez `pacman -Fl` (stare wykrywanie resztek)", env!("CARGO_PKG_VERSION"));
+            let v = env!("CARGO_PKG_VERSION");
+            println!(
+                "{}",
+                trf!(
+                    "XCleaner {v}\n\n  xcleaner                      the window\n  xcleaner --scan [--details]   report in the terminal (deletes nothing)\n  xcleaner --usage [dir]        what takes space in HOME (read-only)\n  --lang en|pl                  language for this run (the window saves its own choice)\n  --no-files-db                 without `pacman -Fl` (older leftover detection)",
+                    "XCleaner {v}\n\n  xcleaner                      okno programu\n  xcleaner --scan [--details]   raport w terminalu (nic nie usuwa)\n  xcleaner --usage [katalog]    co zajmuje miejsce w HOME (tylko odczyt)\n  --lang en|pl                  język tego uruchomienia (okno zapisuje własny wybór)\n  --no-files-db                 bez `pacman -Fl` (stare wykrywanie resztek)"
+                )
+            );
             std::process::ExitCode::SUCCESS
         }
         _ => {
             if xcleaner_core::is_root() {
                 eprintln!(
-                    "XCleaner nie działa jako root w tej wersji (czyści tylko katalog domowy)."
+                    "{}",
+                    tr!(
+                        "Do not run XCleaner as root: start it as your user; system cleaning asks for the password in a terminal.",
+                        "Nie uruchamiaj XCleanera jako root: uruchom go jako swój użytkownik; czyszczenie systemu zapyta o hasło w terminalu."
+                    )
                 );
                 return std::process::ExitCode::FAILURE;
             }
@@ -85,15 +114,19 @@ fn cli_usage(sub: Option<&String>) -> std::process::ExitCode {
                 );
             }
             println!(
-                "\nRazem ~/{}: {} · {} ms",
-                b.rel.display(),
-                format_size(b.total),
-                b.elapsed.as_millis()
+                "{}",
+                trf!(
+                    "\nTotal ~/{}: {} · {} ms",
+                    "\nRazem ~/{}: {} · {} ms",
+                    b.rel.display(),
+                    format_size(b.total),
+                    b.elapsed.as_millis()
+                )
             );
             std::process::ExitCode::SUCCESS
         }
         Err(e) => {
-            eprintln!("Błąd: {e}");
+            eprintln!("{}", trf!("Error: {e}", "Błąd: {e}"));
             std::process::ExitCode::FAILURE
         }
     }
@@ -101,13 +134,13 @@ fn cli_usage(sub: Option<&String>) -> std::process::ExitCode {
 
 fn cli_scan(details: bool) -> std::process::ExitCode {
     let Some(layout) = scan::Layout::from_env() else {
-        eprintln!("Brak poprawnego HOME");
+        eprintln!("{}", tr!("No valid HOME", "Brak poprawnego HOME"));
         return std::process::ExitCode::FAILURE;
     };
     let res = match scan::scan(&layout) {
         Ok(r) => r,
         Err(e) => {
-            eprintln!("Błąd skanowania: {e}");
+            eprintln!("{}", trf!("Scan error: {e}", "Błąd skanowania: {e}"));
             return std::process::ExitCode::FAILURE;
         }
     };
@@ -143,7 +176,7 @@ fn cli_scan(details: bool) -> std::process::ExitCode {
             println!("               └ {b}");
         }
         for e in &f.errors {
-            println!("               └ błąd: {e}");
+            println!("               └ {}", trf!("error: {e}", "błąd: {e}"));
         }
     }
     let selected: u64 = found
@@ -152,13 +185,24 @@ fn cli_scan(details: bool) -> std::process::ExitCode {
         .map(|f| f.usage.bytes)
         .sum();
     println!(
-        "\nRazem: {} · domyślnie zaznaczone: {} · skan {} ms",
-        format_size(res.total()),
-        format_size(selected),
-        res.elapsed.as_millis()
+        "{}",
+        trf!(
+            "\nTotal: {} · selected by default: {} · scan {} ms",
+            "\nRazem: {} · domyślnie zaznaczone: {} · skan {} ms",
+            format_size(res.total()),
+            format_size(selected),
+            res.elapsed.as_millis()
+        )
     );
     if res.hidden > 0 {
-        println!("Ukryte przez listę wyjątków: {}", res.hidden);
+        println!(
+            "{}",
+            trf!(
+                "Hidden by the keep list: {}",
+                "Ukryte przez listę wyjątków: {}",
+                res.hidden
+            )
+        );
     }
     std::process::ExitCode::SUCCESS
 }

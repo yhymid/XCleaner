@@ -1,6 +1,7 @@
 //! Built-in cleaning rules. Every rule names exact locations; nothing is
 //! guessed from a name match. Paths are relative to their XDG base.
 
+use crate::i18n::T;
 use std::path::PathBuf;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -33,16 +34,22 @@ impl Category {
 
     pub fn label(self) -> &'static str {
         match self {
-            Category::System => "System i pulpit",
-            Category::Browsers => "Przeglądarki",
-            Category::Apps => "Aplikacje (Electron/Chromium)",
-            Category::Leftovers => "Pozostałości po odinstalowanych aplikacjach",
-            Category::Projects => "Projekty — artefakty budowania",
-            Category::Development => "Programowanie i pakiety",
-            Category::SystemRoot => "System (wymaga hasła sudo)",
-            Category::Games => "Gry",
-            Category::Trash => "Kosz",
-            Category::Privacy => "Prywatność",
+            Category::System => tr!("System and desktop", "System i pulpit"),
+            Category::Browsers => tr!("Browsers", "Przeglądarki"),
+            Category::Apps => tr!("Apps (Electron/Chromium)", "Aplikacje (Electron/Chromium)"),
+            Category::Leftovers => tr!(
+                "Leftovers of uninstalled apps",
+                "Pozostałości po odinstalowanych aplikacjach"
+            ),
+            Category::Projects => tr!(
+                "Projects — build artifacts",
+                "Projekty — artefakty budowania"
+            ),
+            Category::Development => tr!("Development and packages", "Programowanie i pakiety"),
+            Category::SystemRoot => tr!("System (needs your password)", "System (wymaga hasła)"),
+            Category::Games => tr!("Games", "Gry"),
+            Category::Trash => tr!("Trash", "Kosz"),
+            Category::Privacy => tr!("Privacy", "Prywatność"),
         }
     }
 }
@@ -61,9 +68,9 @@ pub enum Risk {
 impl Risk {
     pub fn label(self) -> &'static str {
         match self {
-            Risk::Safe => "bezpieczne",
-            Risk::Low => "niskie ryzyko",
-            Risk::Review => "do przejrzenia",
+            Risk::Safe => tr!("safe", "bezpieczne"),
+            Risk::Low => tr!("low risk", "niskie ryzyko"),
+            Risk::Review => tr!("review first", "do przejrzenia"),
         }
     }
 }
@@ -81,9 +88,9 @@ pub enum Regen {
 impl Regen {
     pub fn label(self) -> &'static str {
         match self {
-            Regen::Same => "odtwarza się samo",
-            Regen::Slow => "odtwarza się powoli",
-            Regen::Never => "nie wraca",
+            Regen::Same => tr!("rebuilt automatically", "odtwarza się samo"),
+            Regen::Slow => tr!("rebuilt slowly", "odtwarza się powoli"),
+            Regen::Never => tr!("gone for good", "nie wraca"),
         }
     }
 }
@@ -136,8 +143,8 @@ const fn file(base: Base, rel: &'static str) -> Target {
 #[derive(Debug, Clone, Copy)]
 pub struct Rule {
     pub id: &'static str,
-    pub name: &'static str,
-    pub description: &'static str,
+    pub name: T,
+    pub description: T,
     pub category: Category,
     pub risk: Risk,
     pub regen: Regen,
@@ -151,8 +158,8 @@ use Base::*;
 pub static RULES: &[Rule] = &[
     Rule {
         id: "thumbnails",
-        name: "Miniatury plików",
-        description: "Podglądy obrazów i filmów tworzone przez menedżer plików.",
+        name: T::new("File thumbnails", "Miniatury plików"),
+        description: T::new("Image and video previews made by the file manager.", "Podglądy obrazów i filmów tworzone przez menedżer plików."),
         category: Category::System,
         risk: Risk::Safe,
         regen: Regen::Same,
@@ -161,8 +168,8 @@ pub static RULES: &[Rule] = &[
     },
     Rule {
         id: "fontconfig",
-        name: "Cache czcionek (fontconfig)",
-        description: "Indeks czcionek; fc-cache odbudowuje go automatycznie.",
+        name: T::new("Font cache (fontconfig)", "Cache czcionek (fontconfig)"),
+        description: T::new("Font index; fc-cache rebuilds it automatically.", "Indeks czcionek; fc-cache odbudowuje go automatycznie."),
         category: Category::System,
         risk: Risk::Safe,
         regen: Regen::Same,
@@ -171,8 +178,8 @@ pub static RULES: &[Rule] = &[
     },
     Rule {
         id: "gstreamer",
-        name: "Rejestr wtyczek GStreamer",
-        description: "Lista wtyczek multimediów; odbudowywana przy następnym odtwarzaniu.",
+        name: T::new("GStreamer plugin registry", "Rejestr wtyczek GStreamer"),
+        description: T::new("List of media plugins; rebuilt on the next playback.", "Lista wtyczek multimediów; odbudowywana przy następnym odtwarzaniu."),
         category: Category::System,
         risk: Risk::Safe,
         regen: Regen::Same,
@@ -181,8 +188,8 @@ pub static RULES: &[Rule] = &[
     },
     Rule {
         id: "mesa-shaders",
-        name: "Shadery Mesa / RADV",
-        description: "Skompilowane shadery GPU. Po usunięciu gry mogą chwilę przycinać, zanim się odbudują.",
+        name: T::new("Mesa / RADV shaders", "Shadery Mesa / RADV"),
+        description: T::new("Compiled GPU shaders. Games may stutter for a while until they are rebuilt.", "Skompilowane shadery GPU. Po usunięciu gry mogą chwilę przycinać, zanim się odbudują."),
         category: Category::Games,
         risk: Risk::Low,
         regen: Regen::Slow,
@@ -197,8 +204,8 @@ pub static RULES: &[Rule] = &[
     },
     Rule {
         id: "chrome-cache",
-        name: "Google Chrome — pamięć podręczna",
-        description: "Pobrane strony i obrazy. Historia, hasła i ciasteczka zostają.",
+        name: T::new("Google Chrome — cache", "Google Chrome — pamięć podręczna"),
+        description: T::new("Downloaded pages and images. History, passwords and cookies stay.", "Pobrane strony i obrazy. Historia, hasła i ciasteczka zostają."),
         category: Category::Browsers,
         risk: Risk::Safe,
         regen: Regen::Same,
@@ -207,8 +214,8 @@ pub static RULES: &[Rule] = &[
     },
     Rule {
         id: "chromium-cache",
-        name: "Chromium — pamięć podręczna",
-        description: "Pobrane strony i obrazy. Historia, hasła i ciasteczka zostają.",
+        name: T::new("Chromium — cache", "Chromium — pamięć podręczna"),
+        description: T::new("Downloaded pages and images. History, passwords and cookies stay.", "Pobrane strony i obrazy. Historia, hasła i ciasteczka zostają."),
         category: Category::Browsers,
         risk: Risk::Safe,
         regen: Regen::Same,
@@ -217,8 +224,8 @@ pub static RULES: &[Rule] = &[
     },
     Rule {
         id: "firefox-cache",
-        name: "Firefox — pamięć podręczna",
-        description: "Pobrane strony i obrazy. Profil (historia, hasła) jest w innym miejscu i zostaje.",
+        name: T::new("Firefox — cache", "Firefox — pamięć podręczna"),
+        description: T::new("Downloaded pages and images. The profile (history, passwords) lives elsewhere and stays.", "Pobrane strony i obrazy. Profil (historia, hasła) jest w innym miejscu i zostaje."),
         category: Category::Browsers,
         risk: Risk::Safe,
         regen: Regen::Same,
@@ -227,8 +234,8 @@ pub static RULES: &[Rule] = &[
     },
     Rule {
         id: "zen-cache",
-        name: "Zen Browser — pamięć podręczna",
-        description: "Pobrane strony i obrazy. Profil (historia, hasła) zostaje.",
+        name: T::new("Zen Browser — cache", "Zen Browser — pamięć podręczna"),
+        description: T::new("Downloaded pages and images. The profile (history, passwords) stays.", "Pobrane strony i obrazy. Profil (historia, hasła) zostaje."),
         category: Category::Browsers,
         risk: Risk::Safe,
         regen: Regen::Same,
@@ -237,8 +244,8 @@ pub static RULES: &[Rule] = &[
     },
     Rule {
         id: "aur-helpers",
-        name: "Kompilacje AUR (yay / paru / pikaur)",
-        description: "Pobrane źródła i zbudowane paczki AUR. Przy następnej aktualizacji pobiorą się ponownie.",
+        name: T::new("AUR builds (yay / paru / pikaur)", "Kompilacje AUR (yay / paru / pikaur)"),
+        description: T::new("Downloaded sources and built AUR packages. They are downloaded again on the next update.", "Pobrane źródła i zbudowane paczki AUR. Przy następnej aktualizacji pobiorą się ponownie."),
         category: Category::Development,
         risk: Risk::Low,
         regen: Regen::Slow,
@@ -253,8 +260,8 @@ pub static RULES: &[Rule] = &[
     },
     Rule {
         id: "cargo-cache",
-        name: "Cargo — pobrane paczki",
-        description: "Archiwa .crate i klony git z rejestru. Cargo pobierze je ponownie przy budowaniu.",
+        name: T::new("Cargo — downloaded crates", "Cargo — pobrane paczki"),
+        description: T::new(".crate archives and git clones from the registry. Cargo downloads them again when building.", "Archiwa .crate i klony git z rejestru. Cargo pobierze je ponownie przy budowaniu."),
         category: Category::Development,
         risk: Risk::Low,
         regen: Regen::Slow,
@@ -267,8 +274,8 @@ pub static RULES: &[Rule] = &[
     },
     Rule {
         id: "npm-cache",
-        name: "npm — cache i logi",
-        description: "Pamięć podręczna pobranych paczek i logi npm.",
+        name: T::new("npm — cache and logs", "npm — cache i logi"),
+        description: T::new("Cache of downloaded packages and npm logs.", "Pamięć podręczna pobranych paczek i logi npm."),
         category: Category::Development,
         risk: Risk::Safe,
         regen: Regen::Slow,
@@ -277,8 +284,8 @@ pub static RULES: &[Rule] = &[
     },
     Rule {
         id: "pnpm-cache",
-        name: "pnpm — cache metadanych",
-        description: "Metadane paczek pnpm (nie magazyn paczek).",
+        name: T::new("pnpm — metadata cache", "pnpm — cache metadanych"),
+        description: T::new("pnpm package metadata (not the package store).", "Metadane paczek pnpm (nie magazyn paczek)."),
         category: Category::Development,
         risk: Risk::Safe,
         regen: Regen::Slow,
@@ -287,8 +294,8 @@ pub static RULES: &[Rule] = &[
     },
     Rule {
         id: "pip-uv-cache",
-        name: "pip / uv — cache Pythona",
-        description: "Pobrane paczki Pythona.",
+        name: T::new("pip / uv — Python cache", "pip / uv — cache Pythona"),
+        description: T::new("Downloaded Python packages.", "Pobrane paczki Pythona."),
         category: Category::Development,
         risk: Risk::Safe,
         regen: Regen::Slow,
@@ -297,8 +304,8 @@ pub static RULES: &[Rule] = &[
     },
     Rule {
         id: "go-cache",
-        name: "Go — cache kompilacji",
-        description: "Wyniki kompilacji Go; odbudowywane przy następnym budowaniu.",
+        name: T::new("Go — build cache", "Go — cache kompilacji"),
+        description: T::new("Go build results; rebuilt on the next build.", "Wyniki kompilacji Go; odbudowywane przy następnym budowaniu."),
         category: Category::Development,
         risk: Risk::Safe,
         regen: Regen::Slow,
@@ -307,8 +314,8 @@ pub static RULES: &[Rule] = &[
     },
     Rule {
         id: "prism-cache",
-        name: "Prism Launcher — pobrane pliki",
-        description: "Cache pobranych wersji Minecrafta, bibliotek i modów. Instancje i światy zostają.",
+        name: T::new("Prism Launcher — downloads", "Prism Launcher — pobrane pliki"),
+        description: T::new("Cache of downloaded Minecraft versions, libraries and mods. Instances and worlds stay.", "Cache pobranych wersji Minecrafta, bibliotek i modów. Instancje i światy zostają."),
         category: Category::Games,
         risk: Risk::Low,
         regen: Regen::Slow,
@@ -317,8 +324,8 @@ pub static RULES: &[Rule] = &[
     },
     Rule {
         id: "bedrock-cache",
-        name: "Minecraft Bedrock (bedrock-on-linux) — cache",
-        description: "Pobrane pliki launchera Bedrock. Światy zostają.",
+        name: T::new("Minecraft Bedrock (bedrock-on-linux) — cache", "Minecraft Bedrock (bedrock-on-linux) — cache"),
+        description: T::new("Files downloaded by the Bedrock launcher. Worlds stay.", "Pobrane pliki launchera Bedrock. Światy zostają."),
         category: Category::Games,
         risk: Risk::Low,
         regen: Regen::Slow,
@@ -327,8 +334,8 @@ pub static RULES: &[Rule] = &[
     },
     Rule {
         id: "trash",
-        name: "Kosz",
-        description: "Pliki przeniesione do kosza. Po wyczyszczeniu nie da się ich przywrócić.",
+        name: T::new("Trash", "Kosz"),
+        description: T::new("Files moved to the trash. Once emptied they cannot be restored.", "Pliki przeniesione do kosza. Po wyczyszczeniu nie da się ich przywrócić."),
         category: Category::Trash,
         risk: Risk::Review,
         regen: Regen::Never,
@@ -343,8 +350,8 @@ pub static RULES: &[Rule] = &[
     },
     Rule {
         id: "recent-files",
-        name: "Lista ostatnio otwieranych plików",
-        description: "recently-used.xbel — historia otwieranych plików w aplikacjach GTK.",
+        name: T::new("Recently opened files list", "Lista ostatnio otwieranych plików"),
+        description: T::new("recently-used.xbel — history of files opened in GTK apps.", "recently-used.xbel — historia otwieranych plików w aplikacjach GTK."),
         category: Category::Privacy,
         risk: Risk::Review,
         regen: Regen::Never,

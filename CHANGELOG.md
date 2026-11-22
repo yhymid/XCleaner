@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Język / Language
+- Program po angielsku (domyślnie) i po polsku. Przełącznik **EN / PL** jest w pasku okna;
+  wybór zapisuje się w `~/.config/xcleaner/settings.txt`. W terminalu: `--lang en|pl`.
+- Terminal z hasłem i pomocnik roota mówią w języku okna.
+- Rozmiary po angielsku z kropką (`1.5 GiB`), po polsku z przecinkiem (`1,5 GiB`).
+
 ## 0.2.0 - Open Road
 
 XCleaner wychodzi poza Archa: działa na Ubuntu, Debianie, Mincie, Fedorze, openSUSE

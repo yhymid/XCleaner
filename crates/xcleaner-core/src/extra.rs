@@ -122,7 +122,7 @@ fn steam_flavour(root: &Path) -> &'static str {
     } else if s.starts_with("snap/") {
         " (Snap)"
     } else if s.contains("debian-installation") {
-        " (pakiet deb)"
+        tr!(" (deb package)", " (pakiet deb)")
     } else {
         ""
     }
@@ -161,7 +161,7 @@ fn steam_root_items(layout: &Layout, root: &Path, tag: &str, flavour: &str) -> V
         if let Ok(t) = fs::read_to_string(layout.home.join(&apps).join(&f)) {
             names.insert(
                 id,
-                acf_value(&t, "name").unwrap_or_else(|| format!("gra {id}")),
+                acf_value(&t, "name").unwrap_or_else(|| trf!("game {id}", "gra {id}")),
             );
         }
     }
@@ -179,17 +179,30 @@ fn steam_root_items(layout: &Layout, root: &Path, tag: &str, flavour: &str) -> V
         let mut it = match names.get(&id) {
             Some(game) => item(
                 format!("steam-shader:{tag}{d}"),
-                format!("Shadery Steam{flavour}: {game}"),
-                "Skompilowane shadery gry. Po usunięciu gra przycina, dopóki się nie odbudują."
-                    .into(),
+                trf!(
+                    "Steam{flavour} shaders: {game}",
+                    "Shadery Steam{flavour}: {game}"
+                ),
+                tr!(
+                    "Compiled shaders of the game. It stutters until they are rebuilt.",
+                    "Skompilowane shadery gry. Po usunięciu gra przycina, dopóki się nie odbudują."
+                )
+                .into(),
                 Category::Games,
                 Risk::Low,
                 Regen::Slow,
             ),
             None if id < 0x8000_0000 => item(
                 format!("steam-shader:{tag}{d}"),
-                format!("Shadery po odinstalowanej grze{flavour} ({id})"),
-                "Gra nie jest już zainstalowana, a jej shadery zostały na dysku.".into(),
+                trf!(
+                    "Shaders of an uninstalled game{flavour} ({id})",
+                    "Shadery po odinstalowanej grze{flavour} ({id})"
+                ),
+                tr!(
+                    "The game is no longer installed, but its shaders are still on disk.",
+                    "Gra nie jest już zainstalowana, a jej shadery zostały na dysku."
+                )
+                .into(),
                 Category::Games,
                 Risk::Safe,
                 Regen::Never,
@@ -208,8 +221,15 @@ fn steam_root_items(layout: &Layout, root: &Path, tag: &str, flavour: &str) -> V
     }
     let mut logs = item(
         format!("steam-logs{suffix}"),
-        format!("Steam{flavour} — logi i zrzuty awarii"),
-        "Pliki dziennika i zrzuty awarii klienta Steam.".into(),
+        trf!(
+            "Steam{flavour} — logs and crash dumps",
+            "Steam{flavour} — logi i zrzuty awarii"
+        ),
+        tr!(
+            "Log files and crash dumps of the Steam client.",
+            "Pliki dziennika i zrzuty awarii klienta Steam."
+        )
+        .into(),
         Category::Games,
         Risk::Safe,
         Regen::Never,
@@ -220,8 +240,15 @@ fn steam_root_items(layout: &Layout, root: &Path, tag: &str, flavour: &str) -> V
     items.push(logs);
     let mut http = item(
         format!("steam-httpcache{suffix}"),
-        format!("Steam{flavour} — cache sklepu i obrazków"),
-        "Pobrane strony sklepu i grafiki biblioteki.".into(),
+        trf!(
+            "Steam{flavour} — store and image cache",
+            "Steam{flavour} — cache sklepu i obrazków"
+        ),
+        tr!(
+            "Downloaded store pages and library artwork.",
+            "Pobrane strony sklepu i grafiki biblioteki."
+        )
+        .into(),
         Category::Games,
         Risk::Safe,
         Regen::Same,
@@ -259,8 +286,8 @@ pub fn discord_items(layout: &Layout) -> Vec<Item> {
         };
         let mut it = item(
             format!("discord-old:{app}"),
-            format!("{app} — stare wersje po aktualizacji"),
-            "Poprzednie wersje programu pobrane przez auto-aktualizację. Używana jest tylko najnowsza.".into(),
+            trf!("{app} — old versions after an update", "{app} — stare wersje po aktualizacji"),
+            tr!("Previous versions downloaded by the auto-updater. Only the newest one is used.", "Poprzednie wersje programu pobrane przez auto-aktualizację. Używana jest tylko najnowsza.").into(),
             Category::Apps,
             Risk::Safe,
             Regen::Never,
@@ -330,9 +357,13 @@ pub fn cache_rest_items(layout: &Layout, covered: &[PathBuf]) -> Vec<Item> {
             format!("cache:{name}"),
             name.to_string(),
             if stateful {
-                "Ten program trzyma w cache także swój stan — sprawdź przed usunięciem.".into()
+                tr!(
+                    "This program also keeps its state in the cache — check before removing.",
+                    "Ten program trzyma w cache także swój stan — sprawdź przed usunięciem."
+                )
+                .into()
             } else {
-                "Pamięć podręczna programu (~/.cache). Program odtworzy ją sam, gdy będzie potrzebna.".into()
+                tr!("Program cache (~/.cache). The program rebuilds it when needed.", "Pamięć podręczna programu (~/.cache). Program odtworzy ją sam, gdy będzie potrzebna.").into()
             },
             Category::System,
             if stateful { Risk::Review } else { Risk::Safe },
@@ -372,13 +403,19 @@ pub fn flatpak_cache_items(layout: &Layout) -> Vec<Item> {
         let stateful = cache_dir_is_stateful(&leaf, &abs);
         let mut it = item(
             format!("flatpak-cache:{id}"),
-            format!("{id} — cache Flatpak"),
+            trf!("{id} — Flatpak cache", "{id} — cache Flatpak"),
             if stateful {
-                "Cache aplikacji Flatpak, ale ta aplikacja trzyma tam także swój stan — sprawdź przed usunięciem."
-                    .into()
+                tr!(
+                    "Flatpak app cache, but this app also keeps its state there — check before removing.",
+                    "Cache aplikacji Flatpak, ale ta aplikacja trzyma tam także swój stan — sprawdź przed usunięciem."
+                )
+                .into()
             } else {
-                "Pamięć podręczna aplikacji Flatpak. Ustawienia i dane (config, data) zostają."
-                    .into()
+                tr!(
+                    "Flatpak app cache. Settings and data (config, data) stay.",
+                    "Pamięć podręczna aplikacji Flatpak. Ustawienia i dane (config, data) zostają."
+                )
+                .into()
             },
             Category::Apps,
             if stateful { Risk::Review } else { Risk::Safe },
@@ -427,12 +464,15 @@ fn snap_items_in(layout: &Layout, snap_root: &Path) -> Vec<Item> {
             let stateful = cache_dir_is_stateful(&name, &cache_abs);
             let mut it = item(
                 format!("snap-cache:{name}"),
-                format!("{name} — cache Snap"),
+                trf!("{name} — Snap cache", "{name} — cache Snap"),
                 if stateful {
-                    "Cache aplikacji Snap, ale ta aplikacja trzyma tam także swój stan — sprawdź przed usunięciem."
-                        .into()
+                    tr!(
+                        "Snap app cache, but this app also keeps its state there — check before removing.",
+                        "Cache aplikacji Snap, ale ta aplikacja trzyma tam także swój stan — sprawdź przed usunięciem."
+                    )
+                    .into()
                 } else {
-                    "Pamięć podręczna aplikacji Snap (~/snap/…/common/.cache). Ustawienia i dane zostają.".into()
+                    tr!("Snap app cache (~/snap/…/common/.cache). Settings and data stay.", "Pamięć podręczna aplikacji Snap (~/snap/…/common/.cache). Ustawienia i dane zostają.").into()
                 },
                 Category::Apps,
                 if stateful { Risk::Review } else { Risk::Safe },
@@ -448,9 +488,12 @@ fn snap_items_in(layout: &Layout, snap_root: &Path) -> Vec<Item> {
             .and_then(|t| t.file_name().map(|n| n.to_string_lossy().to_string()));
         let mut stale = item(
             format!("snap-old-revisions:{name}"),
-            format!("{name} — dane nieistniejących rewizji Snap"),
-            "Dane rewizji, których nie ma już w /snap. snap revert ich nie użyje; aktualna rewizja i common zostają."
-                .into(),
+            trf!("{name} — data of Snap revisions that no longer exist", "{name} — dane nieistniejących rewizji Snap"),
+            tr!(
+                "Data of revisions no longer in /snap. snap revert will not use them; the current revision and common stay.",
+                "Dane rewizji, których nie ma już w /snap. snap revert ich nie użyje; aktualna rewizja i common zostają."
+            )
+            .into(),
             Category::Leftovers,
             Risk::Low,
             Regen::Never,
@@ -548,7 +591,7 @@ pub fn dead_reason(
     }
     if let Some(t) = try_exec.filter(|t| !t.is_empty()) {
         if program_missing(&t, home) {
-            return Some(format!("brak programu {t}"));
+            return Some(trf!("program {t} is missing", "brak programu {t}"));
         }
     }
     let tokens = split_exec(&exec?);
@@ -572,19 +615,25 @@ pub fn dead_reason(
         return None;
     }
     if program_missing(prog, home) {
-        return Some(format!("brak programu {prog}"));
+        return Some(trf!("program {prog} is missing", "brak programu {prog}"));
     }
     let base = prog.rsplit('/').next().unwrap_or(prog);
     if base == "flatpak" && tokens.get(i + 1).map(String::as_str) == Some("run") {
         let id = tokens[i + 2..].iter().find(|t| !t.starts_with('-'))?;
         if !flatpak_installed(id) {
-            return Some(format!("aplikacja Flatpak {id} nie jest zainstalowana"));
+            return Some(trf!(
+                "Flatpak app {id} is not installed",
+                "aplikacja Flatpak {id} nie jest zainstalowana"
+            ));
         }
     }
     if matches!(base, "wine" | "wine64") {
         if let Some(pfx) = wineprefix {
             if !Path::new(&pfx).is_dir() {
-                return Some(format!("brak prefiksu Wine {pfx}"));
+                return Some(trf!(
+                    "Wine prefix {pfx} is missing",
+                    "brak prefiksu Wine {pfx}"
+                ));
             }
         }
     }
@@ -605,7 +654,7 @@ pub fn dead_launcher_items(layout: &Layout) -> Vec<Item> {
     let home = layout.home.clone();
     let mut it = item(
         "dead-launchers".into(),
-        "Martwe skróty aplikacji".into(),
+        tr!("Dead app shortcuts", "Martwe skróty aplikacji").into(),
         String::new(),
         Category::System,
         Risk::Safe,
@@ -621,7 +670,7 @@ pub fn dead_launcher_items(layout: &Layout) -> Vec<Item> {
             continue;
         };
         let why = if meta.file_type().is_symlink() {
-            (!p.exists()).then(|| "zepsuty link".to_string())
+            (!p.exists()).then(|| tr!("broken link", "zepsuty link").to_string())
         } else if meta.is_file() {
             fs::read_to_string(&p)
                 .ok()
@@ -637,7 +686,8 @@ pub fn dead_launcher_items(layout: &Layout) -> Vec<Item> {
     if it.targets.is_empty() {
         return Vec::new();
     }
-    it.description = format!(
+    it.description = trf!(
+        "Menu shortcuts to programs that are gone.\n{}",
         "Skróty w menu do programów, których już nie ma.\n{}",
         reasons
             .iter()

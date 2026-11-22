@@ -6,10 +6,11 @@ use gtk4 as gtk;
 use std::{cell::RefCell, rc::Rc};
 use xcleaner_core::{
     format_size,
+    i18n::{self, count, Lang},
     keep::KeepList,
-    pl,
     rules::{Category, Item},
     scan::{self, Found, Layout},
+    tr, trf,
 };
 
 const APP_ID: &str = "io.github.yhymid.XCleaner";
@@ -28,7 +29,7 @@ struct State {
     summary: gtk::Label,
     toasts: adw::ToastOverlay,
     window: adw::ApplicationWindow,
-    /// "Zdarzenia": session log for the user and for debugging.
+    /// "Events": session log for the user and for debugging.
     events: RefCell<Vec<String>>,
     restore_button: gtk::Button,
 }
@@ -59,7 +60,7 @@ pub fn run() -> std::process::ExitCode {
 
 fn build(app: &adw::Application) {
     let Some(layout) = Layout::from_env() else {
-        eprintln!("Brak poprawnego HOME");
+        eprintln!("{}", tr!("No valid HOME", "Brak poprawnego HOME"));
         return;
     };
     let window = adw::ApplicationWindow::builder()
@@ -70,31 +71,51 @@ fn build(app: &adw::Application) {
         .build();
 
     let header = adw::HeaderBar::new();
-    let scan_button = gtk::Button::with_label("Skanuj");
+    let scan_button = gtk::Button::with_label(tr!("Scan", "Skanuj"));
     scan_button.add_css_class("suggested-action");
     header.pack_start(&scan_button);
     let usage_button = gtk::Button::from_icon_name("drive-harddisk-symbolic");
-    usage_button.set_tooltip_text(Some("Co zajmuje miejsce"));
+    usage_button.set_tooltip_text(Some(tr!("What takes space", "Co zajmuje miejsce")));
     header.pack_end(&usage_button);
     let events_button = gtk::Button::from_icon_name("document-open-recent-symbolic");
-    events_button.set_tooltip_text(Some("Zdarzenia"));
+    events_button.set_tooltip_text(Some(tr!("Events", "Zdarzenia")));
     header.pack_end(&events_button);
-    let restore_button = gtk::Button::with_label("Przywróć ukryte");
+    let restore_button = gtk::Button::with_label(tr!("Restore hidden", "Przywróć ukryte"));
     restore_button.set_visible(false);
     header.pack_end(&restore_button);
+    // Language switch. The window is rebuilt in the new language and scans
+    // again (item texts are made during the scan). Locked while a scan or
+    // a clean runs, like the scan button.
+    let lang_switch = gtk::DropDown::from_strings(&Lang::ALL.map(Lang::short));
+    lang_switch.set_selected(
+        Lang::ALL
+            .iter()
+            .position(|l| *l == i18n::current())
+            .unwrap_or(0) as u32,
+    );
+    lang_switch.set_tooltip_text(Some(tr!("Language", "Język")));
+    lang_switch.set_valign(gtk::Align::Center);
+    header.pack_end(&lang_switch);
+    scan_button
+        .bind_property("sensitive", &lang_switch, "sensitive")
+        .sync_create()
+        .build();
 
     let content = adw::ToolbarView::new();
     content.add_top_bar(&header);
     content.set_content(Some(&status_page(
         "edit-clear-all-symbolic",
         "XCleaner",
-        "Skanuj, żeby znaleźć pamięć podręczną, logi i inne śmieci w katalogu domowym.\nNic nie zostanie usunięte bez Twojego potwierdzenia.",
+        tr!(
+            "Scan to find caches, logs and other junk in your home directory.\nNothing is deleted without your confirmation.",
+            "Skanuj, żeby znaleźć pamięć podręczną, logi i inne śmieci w katalogu domowym.\nNic nie zostanie usunięte bez Twojego potwierdzenia."
+        ),
     )));
 
     let summary = gtk::Label::new(None);
     summary.set_hexpand(true);
     summary.set_xalign(0.0);
-    let clean_button = gtk::Button::with_label("Wyczyść zaznaczone");
+    let clean_button = gtk::Button::with_label(tr!("Clean selected", "Wyczyść zaznaczone"));
     clean_button.add_css_class("destructive-action");
     clean_button.set_sensitive(false);
     let bottom = gtk::Box::new(gtk::Orientation::Horizontal, 12);
@@ -124,8 +145,28 @@ fn build(app: &adw::Application) {
     });
     event(
         &state,
-        format!("XCleaner {} uruchomiony", env!("CARGO_PKG_VERSION")),
+        trf!(
+            "XCleaner {} started · language: {}",
+            "XCleaner {} uruchomiony · język: {}",
+            env!("CARGO_PKG_VERSION"),
+            i18n::current().short()
+        ),
     );
+    let (app2, win2) = (app.clone(), window.clone());
+    lang_switch.connect_selected_notify(move |d| {
+        let Some(&lang) = Lang::ALL.get(d.selected() as usize) else {
+            return;
+        };
+        if lang == i18n::current() {
+            return;
+        }
+        i18n::set(lang);
+        if let Err(e) = i18n::save(lang) {
+            eprintln!("settings: {e}");
+        }
+        build(&app2);
+        win2.close();
+    });
     let s = state.clone();
     events_button.connect_clicked(move |_| show_events(&s));
     let s = state.clone();
@@ -133,10 +174,18 @@ fn build(app: &adw::Application) {
     let s = state.clone();
     restore_button.connect_clicked(move |_| match KeepList::clear() {
         Ok(()) => {
-            event(&s, "Wyczyszczono listę ukrytych pozycji");
+            event(
+                &s,
+                tr!(
+                    "Cleared the list of hidden items",
+                    "Wyczyszczono listę ukrytych pozycji"
+                ),
+            );
             start_scan(&s);
         }
-        Err(e) => s.toasts.add_toast(adw::Toast::new(&format!("Błąd: {e}"))),
+        Err(e) => s
+            .toasts
+            .add_toast(adw::Toast::new(&trf!("Error: {e}", "Błąd: {e}"))),
     });
 
     let s = state.clone();
@@ -197,7 +246,9 @@ fn start_scan(state: &Rc<State>) {
     state.scan_button.set_sensitive(false);
     state.clean_button.set_sensitive(false);
     state.summary.set_text("");
-    state.content.set_content(Some(&busy_page("Skanowanie…")));
+    state
+        .content
+        .set_content(Some(&busy_page(tr!("Scanning…", "Skanowanie…"))));
     let layout = state.layout.clone();
     let handle = gtk::gio::spawn_blocking(move || scan::scan(&layout));
     let state = state.clone();
@@ -207,16 +258,19 @@ fn start_scan(state: &Rc<State>) {
         match result {
             Ok(Ok(res)) => show_results(&state, res),
             Ok(Err(e)) => {
-                event(&state, format!("Skanowanie nie powiodło się: {e}"));
+                event(
+                    &state,
+                    trf!("Scan failed: {e}", "Skanowanie nie powiodło się: {e}"),
+                );
                 state.content.set_content(Some(&status_page(
                     "dialog-error-symbolic",
-                    "Skanowanie nie powiodło się",
+                    tr!("Scan failed", "Skanowanie nie powiodło się"),
                     &e.to_string(),
                 )));
             }
             Err(_) => state.content.set_content(Some(&status_page(
                 "dialog-error-symbolic",
-                "Skanowanie przerwane",
+                tr!("Scan interrupted", "Skanowanie przerwane"),
                 "",
             ))),
         }
@@ -225,24 +279,31 @@ fn start_scan(state: &Rc<State>) {
 
 fn show_results(state: &Rc<State>, res: scan::ScanResult) {
     state.restore_button.set_visible(res.hidden > 0);
-    state
-        .restore_button
-        .set_label(&format!("Przywróć ukryte ({})", res.hidden));
+    state.restore_button.set_label(&trf!(
+        "Restore hidden ({})",
+        "Przywróć ukryte ({})",
+        res.hidden
+    ));
     let blocked = res.found.iter().filter(|f| f.blocked.is_some()).count();
     let errors: Vec<String> = res
         .found
         .iter()
         .flat_map(|f| f.errors.iter().cloned())
         .collect();
-    let mut msg = format!(
+    let mut msg = trf!(
+        "Scan: {} · {} · {} ms · blocked (program running): {blocked} · hidden: {}",
         "Skan: {} · {} · {} ms · zablokowane (program działa): {blocked} · ukryte: {}",
-        pl(res.found.len() as u64, "pozycja", "pozycje", "pozycji"),
+        count(
+            res.found.len() as u64,
+            ["item", "items"],
+            ["pozycja", "pozycje", "pozycji"]
+        ),
         format_size(res_total(&res.found)),
         res.elapsed.as_millis(),
         res.hidden
     );
     for e in &errors {
-        msg.push_str(&format!("\nbłąd odczytu: {e}"));
+        msg.push_str(&trf!("\nread error: {e}", "\nbłąd odczytu: {e}"));
     }
     event(state, msg);
     let mut found = res.found;
@@ -250,8 +311,11 @@ fn show_results(state: &Rc<State>, res: scan::ScanResult) {
         state.rows.borrow_mut().clear();
         state.content.set_content(Some(&status_page(
             "emblem-ok-symbolic",
-            "Czysto",
-            "Nie znaleziono nic do wyczyszczenia.",
+            tr!("All clean", "Czysto"),
+            tr!(
+                "Nothing to clean was found.",
+                "Nie znaleziono nic do wyczyszczenia."
+            ),
         )));
         update_summary(state);
         return;
@@ -273,7 +337,7 @@ fn show_results(state: &Rc<State>, res: scan::ScanResult) {
             let (row, check) = item_row(f);
             let info = gtk::Button::from_icon_name("view-more-symbolic");
             info.set_valign(gtk::Align::Center);
-            info.set_tooltip_text(Some("Szczegóły"));
+            info.set_tooltip_text(Some(tr!("Details", "Szczegóły")));
             info.add_css_class("flat");
             let (s, fc) = (state.clone(), f.clone());
             info.connect_clicked(move |_| show_details(&s, &fc));
@@ -291,7 +355,8 @@ fn show_results(state: &Rc<State>, res: scan::ScanResult) {
     *state.rows.borrow_mut() = rows;
     state.content.set_content(Some(&page));
     update_summary(state);
-    state.toasts.add_toast(adw::Toast::new(&format!(
+    state.toasts.add_toast(adw::Toast::new(&trf!(
+        "Found {} in {} ms",
         "Znaleziono {} w {} ms",
         format_size(res_total(&found)),
         res.elapsed.as_millis()
@@ -314,7 +379,7 @@ fn item_row(f: &Found) -> (adw::ActionRow, gtk::CheckButton) {
         subtitle = format!("{subtitle}\n⚠ {b}");
     }
     for e in f.errors.iter().take(2) {
-        subtitle = format!("{subtitle}\nBłąd: {e}");
+        subtitle = trf!("{subtitle}\nError: {e}", "{subtitle}\nBłąd: {e}");
     }
     let row = adw::ActionRow::builder()
         .title(glib::markup_escape_text(&it.name).as_str())
@@ -357,11 +422,16 @@ fn update_summary(state: &State) {
     let bytes: u64 = sel.iter().map(|f| f.usage.bytes).sum();
     state.clean_button.set_sensitive(!sel.is_empty());
     state.summary.set_text(&if sel.is_empty() {
-        "Nic nie zaznaczono".to_string()
+        tr!("Nothing selected", "Nic nie zaznaczono").to_string()
     } else {
-        format!(
+        trf!(
+            "Selected {} · {}",
             "Zaznaczono {} · {}",
-            pl(sel.len() as u64, "pozycję", "pozycje", "pozycji"),
+            count(
+                sel.len() as u64,
+                ["item", "items"],
+                ["pozycję", "pozycje", "pozycji"]
+            ),
             format_size(bytes)
         )
     });
@@ -379,7 +449,7 @@ fn confirm_clean(state: &Rc<State>) {
         .map(|f| format!("• {}", f.item.name))
         .collect();
     let more = if sel.len() > 12 {
-        format!("\n… i {} więcej", sel.len() - 12)
+        trf!("\n… and {} more", "\n… i {} więcej", sel.len() - 12)
     } else {
         String::new()
     };
@@ -388,25 +458,37 @@ fn confirm_clean(state: &Rc<State>) {
         .filter(|f| f.item.category == Category::Leftovers)
         .count();
     let note = if leftovers > 0 {
-        format!(
+        trf!(
+            "Deletion cannot be undone. {} removes whole directories of programs that are no longer on the system.",
             "Usunięcia nie można cofnąć. {} usuwa całe katalogi programów, których już nie ma w systemie.",
-            pl(leftovers as u64, "zaznaczona pozostałość", "zaznaczone pozostałości", "zaznaczonych pozostałości")
+            count(
+                leftovers as u64,
+                ["selected leftover", "selected leftovers"],
+                ["zaznaczona pozostałość", "zaznaczone pozostałości", "zaznaczonych pozostałości"]
+            )
         )
     } else {
-        "Usunięcia nie można cofnąć. Konfiguracja i dane osobiste nie są ruszane.".to_string()
+        tr!(
+            "Deletion cannot be undone. Configuration and personal data are not touched.",
+            "Usunięcia nie można cofnąć. Konfiguracja i dane osobiste nie są ruszane."
+        )
+        .to_string()
     };
     let root = sel.iter().any(|f| f.item.category == Category::SystemRoot);
     let note = if root {
-        format!("{note}\n\nDo czyszczenia systemu otworzy się terminal — wpisz tam hasło (sudo, doas albo su).")
+        trf!(
+            "{note}\n\nA terminal opens for system cleaning — type the password there (sudo, doas or su).",
+            "{note}\n\nDo czyszczenia systemu otworzy się terminal — wpisz tam hasło (sudo, doas albo su)."
+        )
     } else {
         note
     };
     let dialog = adw::AlertDialog::new(
-        Some(&format!("Usunąć {}?", format_size(bytes))),
+        Some(&trf!("Delete {}?", "Usunąć {}?", format_size(bytes))),
         Some(&format!("{}{more}\n\n{note}", names.join("\n"))),
     );
-    dialog.add_response("cancel", "Anuluj");
-    dialog.add_response("clean", "Wyczyść");
+    dialog.add_response("cancel", tr!("Cancel", "Anuluj"));
+    dialog.add_response("clean", tr!("Clean", "Wyczyść"));
     dialog.set_response_appearance("clean", adw::ResponseAppearance::Destructive);
     dialog.set_default_response(Some("cancel"));
     dialog.set_close_response("cancel");
@@ -422,11 +504,14 @@ fn confirm_clean(state: &Rc<State>) {
 fn run_clean(state: &Rc<State>, items: Vec<Item>) {
     state.scan_button.set_sensitive(false);
     state.clean_button.set_sensitive(false);
-    state.content.set_content(Some(&busy_page("Czyszczenie…")));
+    state
+        .content
+        .set_content(Some(&busy_page(tr!("Cleaning…", "Czyszczenie…"))));
     let layout = state.layout.clone();
     event(
         state,
-        format!(
+        trf!(
+            "Cleaning: {}",
             "Czyszczenie: {}",
             items
                 .iter()
@@ -440,37 +525,48 @@ fn run_clean(state: &Rc<State>, items: Vec<Item>) {
     glib::spawn_future_local(async move {
         let msg = match handle.await {
             Ok(Ok(rep)) => {
-                let mut log = format!(
+                let mut log = trf!(
+                    "Result: freed {} · {} · {} · skipped entries: {}",
                     "Wynik: zwolniono {} · {} · {} · pominięte wpisy: {}",
                     format_size(rep.freed.bytes),
-                    pl(rep.freed.files, "plik", "pliki", "plików"),
-                    pl(rep.freed.dirs, "katalog", "katalogi", "katalogów"),
+                    count(
+                        rep.freed.files,
+                        ["file", "files"],
+                        ["plik", "pliki", "plików"]
+                    ),
+                    count(
+                        rep.freed.dirs,
+                        ["directory", "directories"],
+                        ["katalog", "katalogi", "katalogów"]
+                    ),
                     rep.skipped
                 );
                 for b in &rep.blocked {
-                    log.push_str(&format!("\npominięto: {b}"));
+                    log.push_str(&trf!("\nskipped: {b}", "\npominięto: {b}"));
                 }
                 for e in &rep.errors {
-                    log.push_str(&format!("\nbłąd: {e}"));
+                    log.push_str(&trf!("\nerror: {e}", "\nbłąd: {e}"));
                 }
                 event(&state, log);
-                let mut m = format!("Zwolniono {}", format_size(rep.freed.bytes));
+                let mut m = trf!("Freed {}", "Zwolniono {}", format_size(rep.freed.bytes));
                 if !rep.blocked.is_empty() {
-                    m.push_str(&format!(
+                    m.push_str(&trf!(
+                        " · skipped {} (program running)",
                         " · pominięto {} (program działa)",
                         rep.blocked.len()
                     ));
                 }
                 if !rep.errors.is_empty() || rep.skipped > 0 {
-                    m.push_str(&format!(
+                    m.push_str(&trf!(
+                        " · {} not removed",
                         " · {} nie usunięto",
                         rep.errors.len() as u64 + rep.skipped
                     ));
                 }
                 m
             }
-            Ok(Err(e)) => format!("Błąd: {e}"),
-            Err(_) => "Czyszczenie przerwane".into(),
+            Ok(Err(e)) => trf!("Error: {e}", "Błąd: {e}"),
+            Err(_) => tr!("Cleaning interrupted", "Czyszczenie przerwane").into(),
         };
         state.toasts.add_toast(adw::Toast::new(&msg));
         start_scan(&state);
@@ -494,7 +590,9 @@ fn show_details(state: &Rc<State>, f: &Found) {
         )
         .build();
     page.add(&about);
-    let paths = adw::PreferencesGroup::builder().title("Ścieżki").build();
+    let paths = adw::PreferencesGroup::builder()
+        .title(tr!("Paths", "Ścieżki"))
+        .build();
     for (rel, action) in it
         .targets
         .iter()
@@ -503,7 +601,10 @@ fn show_details(state: &Rc<State>, f: &Found) {
         paths.add(
             &adw::ActionRow::builder()
                 .title(xcleaner_core::rules::target_label(rel, action))
-                .subtitle("katalog systemowy — czyszczony z uprawnieniami roota")
+                .subtitle(tr!(
+                    "system directory — cleaned with root rights",
+                    "katalog systemowy — czyszczony z uprawnieniami roota"
+                ))
                 .build(),
         );
     }
@@ -513,14 +614,21 @@ fn show_details(state: &Rc<State>, f: &Found) {
             .subtitle(format!(
                 "{} · {} · {}",
                 format_size(u.bytes),
-                pl(u.files, "plik", "pliki", "plików"),
-                pl(u.dirs, "katalog", "katalogi", "katalogów")
+                count(u.files, ["file", "files"], ["plik", "pliki", "plików"]),
+                count(
+                    u.dirs,
+                    ["directory", "directories"],
+                    ["katalog", "katalogi", "katalogów"]
+                )
             ))
             .build();
         let open = gtk::Button::from_icon_name("folder-open-symbolic");
         open.set_valign(gtk::Align::Center);
         open.add_css_class("flat");
-        open.set_tooltip_text(Some("Otwórz w menedżerze plików"));
+        open.set_tooltip_text(Some(tr!(
+            "Open in the file manager",
+            "Otwórz w menedżerze plików"
+        )));
         let abs = state.layout.home.join(rel);
         let win = state.window.clone();
         open.connect_clicked(move |_| {
@@ -538,7 +646,10 @@ fn show_details(state: &Rc<State>, f: &Found) {
     }
     page.add(&paths);
     let actions = adw::PreferencesGroup::new();
-    let hide = gtk::Button::with_label("Nie ruszaj tego — ukryj na stałe");
+    let hide = gtk::Button::with_label(tr!(
+        "Keep this — hide it for good",
+        "Nie ruszaj tego — ukryj na stałe"
+    ));
     hide.set_halign(gtk::Align::Center);
     hide.add_css_class("pill");
     actions.add(&hide);
@@ -548,7 +659,7 @@ fn show_details(state: &Rc<State>, f: &Found) {
     view.add_top_bar(&adw::HeaderBar::new());
     view.set_content(Some(&page));
     let dialog = adw::Dialog::builder()
-        .title("Szczegóły")
+        .title(tr!("Details", "Szczegóły"))
         .content_width(640)
         .content_height(520)
         .child(&view)
@@ -556,8 +667,14 @@ fn show_details(state: &Rc<State>, f: &Found) {
     let (s, id, d) = (state.clone(), it.id.clone(), dialog.clone());
     hide.connect_clicked(move |_| {
         match KeepList::add(&id) {
-            Ok(()) => event(&s, format!("Ukryto na stałe: {id}")),
-            Err(e) => event(&s, format!("Nie udało się zapisać listy ukrytych: {e}")),
+            Ok(()) => event(&s, trf!("Hidden for good: {id}", "Ukryto na stałe: {id}")),
+            Err(e) => event(
+                &s,
+                trf!(
+                    "Could not save the hidden list: {e}",
+                    "Nie udało się zapisać listy ukrytych: {e}"
+                ),
+            ),
         }
         d.close();
         start_scan(&s);
@@ -576,7 +693,8 @@ fn events_markdown(state: &State) -> String {
             })
         })
         .unwrap_or_default();
-    let mut md = format!(
+    let mut md = trf!(
+        "# XCleaner — events\n\n- version: {}\n- GTK: {}.{}.{} · libadwaita {}.{}.{}\n- system: {os}\n- kernel: {}\n- session: {}\n- cleaning history: ~/.local/state/xcleaner/history.log\n\n## Log\n\n",
         "# XCleaner — zdarzenia\n\n- wersja: {}\n- GTK: {}.{}.{} · libadwaita {}.{}.{}\n- system: {os}\n- kernel: {}\n- sesja: {}\n- historia czyszczeń: ~/.local/state/xcleaner/history.log\n\n## Dziennik\n\n",
         env!("CARGO_PKG_VERSION"),
         gtk::major_version(),
@@ -614,15 +732,15 @@ fn show_events(state: &Rc<State>) {
         .vexpand(true)
         .build();
     let header = adw::HeaderBar::new();
-    let copy = gtk::Button::with_label("Kopiuj");
-    let save = gtk::Button::with_label("Zapisz .md");
+    let copy = gtk::Button::with_label(tr!("Copy", "Kopiuj"));
+    let save = gtk::Button::with_label(tr!("Save .md", "Zapisz .md"));
     header.pack_start(&copy);
     header.pack_start(&save);
     let view = adw::ToolbarView::new();
     view.add_top_bar(&header);
     view.set_content(Some(&scroll));
     let dialog = adw::Dialog::builder()
-        .title("Zdarzenia")
+        .title(tr!("Events", "Zdarzenia"))
         .content_width(760)
         .content_height(560)
         .child(&view)
@@ -630,21 +748,24 @@ fn show_events(state: &Rc<State>) {
     let (t, s) = (text.clone(), state.clone());
     copy.connect_clicked(move |b| {
         b.clipboard().set_text(&t);
-        s.toasts.add_toast(adw::Toast::new("Skopiowano do schowka"));
+        s.toasts.add_toast(adw::Toast::new(tr!(
+            "Copied to the clipboard",
+            "Skopiowano do schowka"
+        )));
     });
     let (t, s) = (text, state.clone());
     save.connect_clicked(move |_| {
         let fd = gtk::FileDialog::builder()
-            .title("Zapisz zdarzenia")
-            .initial_name("xcleaner-zdarzenia.md")
+            .title(tr!("Save events", "Zapisz zdarzenia"))
+            .initial_name(tr!("xcleaner-events.md", "xcleaner-zdarzenia.md"))
             .build();
         let (t, s2) = (t.clone(), s.clone());
         fd.save(Some(&s.window), None::<&gtk::gio::Cancellable>, move |r| {
             if let Ok(file) = r {
                 if let Some(p) = file.path() {
                     let msg = match std::fs::write(&p, &t) {
-                        Ok(()) => format!("Zapisano {}", p.display()),
-                        Err(e) => format!("Błąd zapisu: {e}"),
+                        Ok(()) => trf!("Saved {}", "Zapisano {}", p.display()),
+                        Err(e) => trf!("Write error: {e}", "Błąd zapisu: {e}"),
                     };
                     s2.toasts.add_toast(adw::Toast::new(&msg));
                 }
@@ -666,14 +787,14 @@ struct UsageView {
 fn show_usage(state: &Rc<State>) {
     let header = adw::HeaderBar::new();
     let back = gtk::Button::from_icon_name("go-previous-symbolic");
-    back.set_tooltip_text(Some("Wróć"));
+    back.set_tooltip_text(Some(tr!("Back", "Wróć")));
     header.pack_start(&back);
-    let title = adw::WindowTitle::new("Co zajmuje miejsce", "~");
+    let title = adw::WindowTitle::new(tr!("What takes space", "Co zajmuje miejsce"), "~");
     header.set_title_widget(Some(&title));
     let view = adw::ToolbarView::new();
     view.add_top_bar(&header);
     let dialog = adw::Dialog::builder()
-        .title("Co zajmuje miejsce")
+        .title(tr!("What takes space", "Co zajmuje miejsce"))
         .content_width(720)
         .content_height(640)
         .child(&view)
@@ -698,14 +819,20 @@ fn show_usage(state: &Rc<State>) {
         load_usage(&u, target);
     });
     load_usage(&uv, std::path::PathBuf::new());
-    event(state, "Otwarto „Co zajmuje miejsce”");
+    event(
+        state,
+        tr!("Opened “What takes space”", "Otwarto „Co zajmuje miejsce”"),
+    );
     dialog.present(Some(&state.window));
 }
 
 fn load_usage(uv: &Rc<UsageView>, rel: std::path::PathBuf) {
     uv.back.set_sensitive(uv.path.borrow().len() > 1);
     uv.title.set_subtitle(&format!("~/{}", rel.display()));
-    uv.view.set_content(Some(&busy_page("Liczenie rozmiarów…")));
+    uv.view.set_content(Some(&busy_page(tr!(
+        "Counting sizes…",
+        "Liczenie rozmiarów…"
+    ))));
     let (home, r) = (uv.home.clone(), rel.clone());
     let handle = gtk::gio::spawn_blocking(move || xcleaner_core::usage::breakdown(&home, &r));
     let uv = uv.clone();
@@ -715,7 +842,7 @@ fn load_usage(uv: &Rc<UsageView>, rel: std::path::PathBuf) {
             Ok(Err(e)) => {
                 uv.view.set_content(Some(&status_page(
                     "dialog-error-symbolic",
-                    "Nie można odczytać",
+                    tr!("Cannot read", "Nie można odczytać"),
                     &e.to_string(),
                 )));
                 return;
@@ -728,23 +855,30 @@ fn load_usage(uv: &Rc<UsageView>, rel: std::path::PathBuf) {
             .description(format!(
                 "{} · {} · {} ms",
                 format_size(b.total),
-                pl(b.entries.len() as u64, "pozycja", "pozycje", "pozycji"),
+                count(
+                    b.entries.len() as u64,
+                    ["entry", "entries"],
+                    ["pozycja", "pozycje", "pozycji"]
+                ),
                 b.elapsed.as_millis()
             ))
             .build();
         for e in b.entries.iter().take(300) {
             let mut subtitle = format!(
                 "{} · {}",
-                pl(e.usage.files, "plik", "pliki", "plików"),
-                pl(
+                count(
+                    e.usage.files,
+                    ["file", "files"],
+                    ["plik", "pliki", "plików"]
+                ),
+                count(
                     e.usage.dirs.saturating_sub(e.is_dir as u64),
-                    "katalog",
-                    "katalogi",
-                    "katalogów"
+                    ["directory", "directories"],
+                    ["katalog", "katalogi", "katalogów"]
                 )
             );
             if e.is_symlink {
-                subtitle = "dowiązanie (nie jest liczone)".into();
+                subtitle = tr!("link (not counted)", "dowiązanie (nie jest liczone)").into();
             }
             if let Some(n) = &e.note {
                 subtitle.push_str(&format!(" · {n}"));
@@ -779,7 +913,10 @@ fn load_usage(uv: &Rc<UsageView>, rel: std::path::PathBuf) {
             let open = gtk::Button::from_icon_name("folder-open-symbolic");
             open.set_valign(gtk::Align::Center);
             open.add_css_class("flat");
-            open.set_tooltip_text(Some("Otwórz w menedżerze plików"));
+            open.set_tooltip_text(Some(tr!(
+                "Open in the file manager",
+                "Otwórz w menedżerze plików"
+            )));
             let abs = uv.home.join(&e.rel);
             let win = uv.window.clone();
             open.connect_clicked(move |_| {

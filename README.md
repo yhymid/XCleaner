@@ -9,8 +9,8 @@ and personal data are never selected for you.
 [![Latest release](https://img.shields.io/github/v/release/yhymid/XCleaner)](https://github.com/yhymid/XCleaner/releases/latest)
 ![License: MIT](https://img.shields.io/badge/license-MIT-blue)
 
-> The interface is in Polish. Deletion is permanent — there is no quarantine,
-> and the program says so before every clean.
+> English and Polish interface — switch **EN / PL** in the window's header bar.
+> Deletion is permanent — there is no quarantine, and the program says so before every clean.
 
 ## Download
 
@@ -42,6 +42,7 @@ Debian 12 and Ubuntu 22.04 are too old (glibc and GTK).
 xcleaner                      # window (from the menu: XCleaner)
 xcleaner --scan [--details]   # report in the terminal, deletes nothing
 xcleaner --usage [dir]        # what takes space in HOME, like ncdu (read-only)
+xcleaner --lang pl --scan     # language for one run: en | pl
 ```
 
 Run it **without sudo**. System cleaning opens a terminal and asks for the password

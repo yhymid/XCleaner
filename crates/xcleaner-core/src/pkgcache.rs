@@ -206,9 +206,10 @@ pub fn probe() -> Option<(u64, u64, String)> {
         bytes += b;
         files += n;
         parts.push(if m.exact() {
-            format!("{}: {n} paczek", m.label())
+            trf!("{}: {n} packages", "{}: {n} paczek", m.label())
         } else {
-            format!(
+            trf!(
+                "{}: {n} files, frees up to {}",
                 "{}: {n} plików, zwolni do {}",
                 m.label(),
                 crate::format_size(b)
@@ -224,7 +225,13 @@ pub fn probe_apt_clean() -> Option<(u64, u64, String)> {
         return None;
     }
     let (b, n) = cache_size(Manager::Apt);
-    (n > 0).then(|| (b, n, format!("{n} pobranych paczek .deb")))
+    (n > 0).then(|| {
+        (
+            b,
+            n,
+            trf!("{n} downloaded .deb packages", "{n} pobranych paczek .deb"),
+        )
+    })
 }
 
 fn run(bin: &str, args: &[&str]) -> Result<(), String> {
@@ -234,7 +241,11 @@ fn run(bin: &str, args: &[&str]) -> Result<(), String> {
         .status()
     {
         Ok(s) if s.success() => Ok(()),
-        Ok(s) => Err(format!("{bin}: kod {}", s.code().unwrap_or(-1))),
+        Ok(s) => Err(trf!(
+            "{bin}: code {}",
+            "{bin}: kod {}",
+            s.code().unwrap_or(-1)
+        )),
         Err(e) => Err(format!("{bin}: {e}")),
     }
 }
@@ -243,13 +254,19 @@ fn busy() -> Option<(u64, Vec<String>)> {
     crate::locks::busy_package_manager().map(|pm| {
         (
             0,
-            vec![format!("działa menedżer pakietów: {pm} — pominięto")],
+            vec![trf!(
+                "a package manager is running: {pm} — skipped",
+                "działa menedżer pakietów: {pm} — pominięto"
+            )],
         )
     })
 }
 
 pub fn root_clean() -> (u64, Vec<String>) {
-    crate::root::say("• Cache menedżera pakietów…");
+    crate::root::say(tr!(
+        "• Package manager cache…",
+        "• Cache menedżera pakietów…"
+    ));
     if let Some(r) = busy() {
         return r;
     }

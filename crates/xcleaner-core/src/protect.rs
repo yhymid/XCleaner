@@ -107,10 +107,13 @@ pub fn steam_refusal(roots: &[std::path::PathBuf], rel: &Path) -> Option<&'stati
             continue;
         };
         if STEAM_NEVER_EXACT.iter().any(|p| sub == Path::new(p)) {
-            return Some("katalog zbiorczy Steam");
+            return Some(tr!("Steam collection directory", "katalog zbiorczy Steam"));
         }
         if STEAM_NEVER_INSIDE.iter().any(|p| sub.starts_with(p)) {
-            return Some("chroniona lokalizacja (klucze, konfiguracja, dane gier)");
+            return Some(tr!(
+                "protected location (keys, configuration, game data)",
+                "chroniona lokalizacja (klucze, konfiguracja, dane gier)"
+            ));
         }
     }
     None
@@ -120,17 +123,26 @@ pub fn steam_refusal(roots: &[std::path::PathBuf], rel: &Path) -> Option<&'stati
 pub fn refusal(rel: &Path) -> Option<&'static str> {
     let comps: Vec<_> = rel.components().collect();
     if comps.is_empty() || comps.iter().any(|c| !matches!(c, Component::Normal(_))) {
-        return Some("ścieżka spoza katalogu domowego");
+        return Some(tr!(
+            "path outside the home directory",
+            "ścieżka spoza katalogu domowego"
+        ));
     }
     // Top-level HOME entries (Documents, Pictures, .config…) are never targets.
     if comps.len() < 2 {
-        return Some("katalog najwyższego poziomu w HOME");
+        return Some(tr!(
+            "top-level directory in HOME",
+            "katalog najwyższego poziomu w HOME"
+        ));
     }
     if NEVER_EXACT.iter().any(|p| pattern_exact(rel, p)) {
-        return Some("katalog zbiorczy");
+        return Some(tr!("collection directory", "katalog zbiorczy"));
     }
     if NEVER_INSIDE.iter().any(|p| pattern_prefix(rel, p)) {
-        return Some("chroniona lokalizacja (klucze, konfiguracja, dane gier)");
+        return Some(tr!(
+            "protected location (keys, configuration, game data)",
+            "chroniona lokalizacja (klucze, konfiguracja, dane gier)"
+        ));
     }
     None
 }

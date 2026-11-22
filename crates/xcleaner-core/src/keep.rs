@@ -55,13 +55,11 @@ impl KeepList {
     }
 
     fn save(&self) -> io::Result<()> {
-        let p = path().ok_or_else(|| io::Error::other("brak HOME"))?;
+        let p = path().ok_or_else(|| io::Error::other(tr!("no HOME", "brak HOME")))?;
         if let Some(d) = p.parent() {
             fs::create_dir_all(d)?;
         }
-        let mut body = String::from(
-            "# XCleaner: pozycje, których nie pokazywać ani nie czyścić (jedna na linię)\n",
-        );
+        let mut body = String::from("# XCleaner: items not to show or clean (one per line)\n");
         for id in &self.ids {
             body.push_str(id);
             body.push('\n');

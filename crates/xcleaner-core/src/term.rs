@@ -226,8 +226,8 @@ impl Elevate {
     /// What the terminal window asks for.
     pub fn password_hint(self) -> &'static str {
         match self {
-            Elevate::Sudo | Elevate::Doas => "hasło użytkownika",
-            Elevate::Su => "hasło roota",
+            Elevate::Sudo | Elevate::Doas => tr!("your password", "hasło użytkownika"),
+            Elevate::Su => tr!("root password", "hasło roota"),
         }
     }
 
@@ -310,7 +310,7 @@ fn open_status(path: &Path) -> io::Result<fs::File> {
     if !m.is_file() || m.uid() != unsafe { libc::geteuid() } || m.nlink() != 1 {
         return Err(io::Error::new(
             io::ErrorKind::PermissionDenied,
-            "niezaufany plik statusu",
+            tr!("untrusted status file", "niezaufany plik statusu"),
         ));
     }
     Ok(f)
@@ -319,11 +319,17 @@ fn open_status(path: &Path) -> io::Result<fs::File> {
 /// Entry point of `--term-wrap <status> -- <program> <args…>`.
 pub fn run_wrapper(args: &[String]) -> i32 {
     let (Some(status), Some("--")) = (args.first(), args.get(1).map(String::as_str)) else {
-        eprintln!("użycie: {WRAP_ARG} <plik> -- <program> …");
+        eprintln!(
+            "{}",
+            trf!(
+                "usage: {WRAP_ARG} <file> -- <program> …",
+                "użycie: {WRAP_ARG} <plik> -- <program> …"
+            )
+        );
         return 2;
     };
     let Some(program) = args.get(2) else {
-        eprintln!("brak programu");
+        eprintln!("{}", tr!("missing program", "brak programu"));
         return 2;
     };
     let mut f = match open_status(Path::new(status)) {
@@ -347,7 +353,13 @@ pub fn run_wrapper(args: &[String]) -> i32 {
     let _ = writeln!(f, "exit\t{code}");
     if code != 0 {
         // Keep the window open so the message can be read.
-        eprintln!("\nZakończono z błędem (kod {code}). Naciśnij Enter, aby zamknąć okno.");
+        eprintln!(
+            "{}",
+            trf!(
+                "\nFinished with an error (code {code}). Press Enter to close the window.",
+                "\nZakończono z błędem (kod {code}). Naciśnij Enter, aby zamknąć okno."
+            )
+        );
         let mut s = String::new();
         let _ = io::stdin().read_line(&mut s);
     }

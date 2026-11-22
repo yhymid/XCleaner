@@ -225,15 +225,16 @@ pub fn artifact_items(layout: &Layout) -> Vec<Item> {
                 .collect();
             Some(Item {
                 id: format!("artifacts:{}", rel_dir.display()),
-                name: format!("{name} — artefakty budowania ({})", p.kinds.join(", ")),
-                description: format!(
+                name: trf!("{name} — build artifacts ({})", "{name} — artefakty budowania ({})", p.kinds.join(", ")),
+                description: trf!(
+                    "Project ~/{} · {} · last built {}. Rebuilt on the next build; the source code stays.",
                     "Projekt ~/{} · {} · ostatnio budowany {}. Odtworzy się przy następnym budowaniu; kod źródłowy zostaje.",
                     rel_dir.display(),
                     arts.join(", "),
                     match age_days {
-                        0 => "dziś".to_string(),
-                        1 => "wczoraj".to_string(),
-                        d => format!("{d} dni temu"),
+                        0 => tr!("today", "dziś").to_string(),
+                        1 => tr!("yesterday", "wczoraj").to_string(),
+                        d => trf!("{d} days ago", "{d} dni temu"),
                     }
                 ),
                 category: Category::Projects,

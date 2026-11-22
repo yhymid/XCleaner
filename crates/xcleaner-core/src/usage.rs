@@ -89,12 +89,20 @@ pub fn breakdown(home_path: &Path, rel: &Path) -> io::Result<Breakdown> {
                 entries[*i]
                     .note
                     .get_or_insert_with(|| match e.raw_os_error() {
-                        Some(libc::EXDEV) => "zawiera punkt montowania (pominięty)".into(),
-                        Some(libc::ELOOP) => "zawiera dowiązanie (pominięte)".into(),
+                        Some(libc::EXDEV) => tr!(
+                            "contains a mount point (skipped)",
+                            "zawiera punkt montowania (pominięty)"
+                        )
+                        .into(),
+                        Some(libc::ELOOP) => tr!(
+                            "contains a link (skipped)",
+                            "zawiera dowiązanie (pominięte)"
+                        )
+                        .into(),
                         Some(libc::EACCES) | Some(libc::EPERM) => {
-                            "brak dostępu do części plików".into()
+                            tr!("no access to some files", "brak dostępu do części plików").into()
                         }
-                        _ => format!("błąd: {e}"),
+                        _ => trf!("error: {e}", "błąd: {e}"),
                     });
             }
         }

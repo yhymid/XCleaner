@@ -57,13 +57,20 @@ pub fn probe_journal() -> Option<(u64, u64, String)> {
         (
             bytes,
             f.len() as u64,
-            format!("{} archiwalnych plików starszych niż 4 tygodnie", f.len()),
+            trf!(
+                "{} archived files older than 4 weeks",
+                "{} archiwalnych plików starszych niż 4 tygodnie",
+                f.len()
+            ),
         )
     })
 }
 
 pub fn root_journal() -> (u64, Vec<String>) {
-    crate::root::say(&format!("• Dziennik systemd: starsze niż {JOURNAL_KEEP}…"));
+    crate::root::say(&trf!(
+        "• systemd journal: older than {JOURNAL_KEEP}…",
+        "• Dziennik systemd: starsze niż {JOURNAL_KEEP}…"
+    ));
     let before: u64 = old_journal_files().iter().map(|(_, b)| b).sum();
     let out = crate::host_command(JOURNALCTL)
         .arg(format!("--vacuum-time={JOURNAL_KEEP}"))
@@ -74,7 +81,11 @@ pub fn root_journal() -> (u64, Vec<String>) {
         Ok(s) if s.success() => (before.saturating_sub(after), Vec::new()),
         Ok(s) => (
             before.saturating_sub(after),
-            vec![format!("journalctl: kod {}", s.code().unwrap_or(-1))],
+            vec![trf!(
+                "journalctl: code {}",
+                "journalctl: kod {}",
+                s.code().unwrap_or(-1)
+            )],
         ),
         Err(e) => (0, vec![format!("journalctl: {e}")]),
     }
@@ -173,14 +184,17 @@ pub fn probe_rotated_logs() -> Option<(u64, u64, String)> {
     (!f.is_empty()).then(|| {
         let mut d = names.join(", ");
         if more > 0 {
-            d.push_str(&format!(" … i {more} więcej"));
+            d.push_str(&trf!(" … and {more} more", " … i {more} więcej"));
         }
         (bytes, f.len() as u64, d)
     })
 }
 
 pub fn root_rotated_logs() -> (u64, Vec<String>) {
-    crate::root::say("• Stare, zrotowane logi w /var/log…");
+    crate::root::say(tr!(
+        "• Old rotated logs in /var/log…",
+        "• Stare, zrotowane logi w /var/log…"
+    ));
     let base = match Home::open(Path::new(LOG_DIR)) {
         Ok(b) => b,
         Err(e) => return (0, vec![format!("{LOG_DIR}: {e}")]),
@@ -201,7 +215,11 @@ pub fn root_rotated_logs() -> (u64, Vec<String>) {
             Err(e) => errs.push(format!("{}: {e}", rel.display())),
         }
     }
-    crate::root::say(&format!("  zwolniono {}", crate::format_size(freed)));
+    crate::root::say(&trf!(
+        "  freed {}",
+        "  zwolniono {}",
+        crate::format_size(freed)
+    ));
     (freed, errs)
 }
 
@@ -286,7 +304,10 @@ fn free_bytes(path: &str) -> Option<u64> {
 }
 
 pub fn root_flatpak_unused() -> (u64, Vec<String>) {
-    crate::root::say("• Nieużywane runtime’y Flatpak…");
+    crate::root::say(tr!(
+        "• Unused Flatpak runtimes…",
+        "• Nieużywane runtime’y Flatpak…"
+    ));
     if !Path::new(FLATPAK).exists() {
         return (0, Vec::new());
     }
@@ -310,7 +331,11 @@ pub fn root_flatpak_unused() -> (u64, Vec<String>) {
         Ok(s) if s.success() => (freed, Vec::new()),
         Ok(s) => (
             freed,
-            vec![format!("flatpak: kod {}", s.code().unwrap_or(-1))],
+            vec![trf!(
+                "flatpak: code {}",
+                "flatpak: kod {}",
+                s.code().unwrap_or(-1)
+            )],
         ),
         Err(e) => (0, vec![format!("flatpak: {e}")]),
     }
@@ -382,10 +407,18 @@ pub fn probe_crash_reports() -> Option<(u64, u64, String)> {
     let bytes = a.iter().map(|(_, s)| s).sum::<u64>() + b.iter().map(|(_, s)| s).sum::<u64>();
     let mut parts = Vec::new();
     if !a.is_empty() {
-        parts.push(format!("apport: {} raportów w {APPORT_DIR}", a.len()));
+        parts.push(trf!(
+            "apport: {} reports in {APPORT_DIR}",
+            "apport: {} raportów w {APPORT_DIR}",
+            a.len()
+        ));
     }
     if !b.is_empty() {
-        parts.push(format!("ABRT: {} problemów w {ABRT_DIR}", b.len()));
+        parts.push(trf!(
+            "ABRT: {} problems in {ABRT_DIR}",
+            "ABRT: {} problemów w {ABRT_DIR}",
+            b.len()
+        ));
     }
     (!parts.is_empty()).then(|| (bytes, (a.len() + b.len()) as u64, parts.join("; ")))
 }
@@ -433,7 +466,10 @@ fn unlink_in(dir: &str, names: &[(String, u64)]) -> (u64, Vec<String>) {
 }
 
 pub fn root_crash_reports() -> (u64, Vec<String>) {
-    crate::root::say("• Raporty awarii (apport / ABRT)…");
+    crate::root::say(tr!(
+        "• Crash reports (apport / ABRT)…",
+        "• Raporty awarii (apport / ABRT)…"
+    ));
     let (mut freed, mut errs) = unlink_in(APPORT_DIR, &apport_reports());
     if let Some((bin, sub)) = abrt_bin() {
         for (dir, size) in abrt_problems() {
@@ -444,7 +480,8 @@ pub fn root_crash_reports() -> (u64, Vec<String>) {
                 .status()
             {
                 Ok(s) if s.success() => freed += size,
-                Ok(s) => errs.push(format!(
+                Ok(s) => errs.push(trf!(
+                    "{bin} {sub} {}: code {}",
                     "{bin} {sub} {}: kod {}",
                     dir.display(),
                     s.code().unwrap_or(-1)
@@ -529,11 +566,18 @@ pub fn probe_snap_disabled() -> Option<(u64, u64, String)> {
 }
 
 pub fn root_snap_disabled() -> (u64, Vec<String>) {
-    crate::root::say("• Wyłączone rewizje Snap…");
+    crate::root::say(tr!(
+        "• Disabled Snap revisions…",
+        "• Wyłączone rewizje Snap…"
+    ));
     if snap_change_running() {
         return (
             0,
-            vec!["snapd wykonuje zmianę (snap changes) — pominięto".into()],
+            vec![tr!(
+                "snapd is making a change (snap changes) — skipped",
+                "snapd wykonuje zmianę (snap changes) — pominięto"
+            )
+            .into()],
         );
     }
     let mut freed = 0;
@@ -546,7 +590,8 @@ pub fn root_snap_disabled() -> (u64, Vec<String>) {
             .status()
         {
             Ok(s) if s.success() => freed += size,
-            Ok(s) => errs.push(format!(
+            Ok(s) => errs.push(trf!(
+                "snap remove {name} {rev}: code {}",
                 "snap remove {name} {rev}: kod {}",
                 s.code().unwrap_or(-1)
             )),
@@ -571,8 +616,11 @@ pub fn probe_ostree() -> Option<(u64, u64, String)> {
         (
             0,
             0,
-            "przerwane operacje i cache metadanych (rozmiaru nie da się odczytać bez roota)"
-                .to_string(),
+            tr!(
+                "interrupted operations and metadata cache (the size cannot be read without root)",
+                "przerwane operacje i cache metadanych (rozmiaru nie da się odczytać bez roota)"
+            )
+            .to_string(),
         )
     })
 }
@@ -595,7 +643,11 @@ pub fn root_ostree() -> (u64, Vec<String>) {
         Ok(s) if s.success() => (freed, Vec::new()),
         Ok(s) => (
             freed,
-            vec![format!("rpm-ostree: kod {}", s.code().unwrap_or(-1))],
+            vec![trf!(
+                "rpm-ostree: code {}",
+                "rpm-ostree: kod {}",
+                s.code().unwrap_or(-1)
+            )],
         ),
         Err(e) => (0, vec![format!("rpm-ostree: {e}")]),
     }
