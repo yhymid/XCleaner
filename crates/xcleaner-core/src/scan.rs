@@ -429,6 +429,18 @@ fn root_found() -> Vec<Found> {
                     format!("{}. Potrzebne tylko do zgłaszania błędów; zrzuty kdump po panice kernela zostają.", p.detail),
                     Regen::Never,
                 ),
+                RootTask::SnapDisabled => (
+                    "root:snap-disabled",
+                    "Wyłączone (stare) rewizje Snap",
+                    format!("{}. snapd trzyma je dla snap revert; aktualne rewizje zostają.", p.detail),
+                    Regen::Never,
+                ),
+                RootTask::OstreeCleanup => (
+                    "root:ostree-cleanup",
+                    "rpm-ostree: pozostałości operacji",
+                    format!("rpm-ostree cleanup -b -m: {}. Wdrożenie do cofnięcia (rollback) zostaje.", p.detail),
+                    Regen::Never,
+                ),
                 RootTask::KernelModules => (
                     "root:kernel-modules",
                     "Moduły po usuniętych kernelach",

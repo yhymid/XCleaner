@@ -55,10 +55,14 @@ pub enum RootTask {
     AptClean,
     /// apport reports in /var/crash, ABRT problems via its CLI.
     CrashReports,
+    /// `snap remove <name> --revision=<rev>` for disabled revisions.
+    SnapDisabled,
+    /// `rpm-ostree cleanup -b -m`.
+    OstreeCleanup,
 }
 
 impl RootTask {
-    pub const ALL: [RootTask; 12] = [
+    pub const ALL: [RootTask; 14] = [
         RootTask::Coredumps,
         RootTask::PacmanCache,
         RootTask::PacmanCacheAll,
@@ -71,6 +75,8 @@ impl RootTask {
         RootTask::PkgCache,
         RootTask::AptClean,
         RootTask::CrashReports,
+        RootTask::SnapDisabled,
+        RootTask::OstreeCleanup,
     ];
 
     /// Where the task works (for display).
@@ -86,6 +92,8 @@ impl RootTask {
             RootTask::PkgCache => "/var/cache",
             RootTask::AptClean => "/var/cache/apt/archives",
             RootTask::CrashReports => "/var/crash",
+            RootTask::SnapDisabled => "/var/lib/snapd/snaps",
+            RootTask::OstreeCleanup => "/sysroot",
         }
     }
 
@@ -103,6 +111,8 @@ impl RootTask {
             RootTask::PkgCache => "pkg-cache",
             RootTask::AptClean => "apt-clean",
             RootTask::CrashReports => "crash-reports",
+            RootTask::SnapDisabled => "snap-disabled",
+            RootTask::OstreeCleanup => "ostree-cleanup",
         }
     }
 
@@ -827,6 +837,8 @@ pub fn run_root(args: &[String]) -> i32 {
             RootTask::PkgCache => crate::pkgcache::root_clean(),
             RootTask::AptClean => crate::pkgcache::root_apt_clean(),
             RootTask::CrashReports => crate::sysclean::root_crash_reports(),
+            RootTask::SnapDisabled => crate::sysclean::root_snap_disabled(),
+            RootTask::OstreeCleanup => crate::sysclean::root_ostree(),
         };
         report.line("freed", t, &freed.to_string());
         for e in &errs {

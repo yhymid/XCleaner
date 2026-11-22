@@ -456,6 +456,151 @@ pub fn root_crash_reports() -> (u64, Vec<String>) {
     (freed, errs)
 }
 
+// ------------------------------------------------------------------ snap
+
+const SNAP: &str = "/usr/bin/snap";
+const SNAPS_DIR: &str = "/var/lib/snapd/snaps";
+
+/// Disabled revisions from `snap list --all`: columns Name Version Rev
+/// Tracking Publisher Notes; Notes holds `disabled` (maybe `base,disabled`).
+pub fn parse_snap_disabled(out: &str) -> Vec<(String, String)> {
+    out.lines()
+        .skip(1)
+        .filter_map(|l| {
+            let c: Vec<&str> = l.split_whitespace().collect();
+            let notes = c.last()?;
+            (c.len() >= 6 && notes.split(',').any(|n| n == "disabled"))
+                .then(|| (c[0].to_string(), c[2].to_string()))
+        })
+        .filter(|(n, r)| !n.is_empty() && r.bytes().all(|b| b.is_ascii_alphanumeric()))
+        .collect()
+}
+
+fn snap_output(args: &[&str]) -> Option<String> {
+    if !Path::new(SNAP).exists() {
+        return None;
+    }
+    let o = crate::host_command(SNAP)
+        .args(args)
+        .env("LC_ALL", "C")
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output()
+        .ok()?;
+    o.status
+        .success()
+        .then(|| String::from_utf8_lossy(&o.stdout).into_owned())
+}
+
+/// snapd serializes changes itself; skip while one is in progress.
+fn snap_change_running() -> bool {
+    snap_output(&["changes"]).is_some_and(|o| {
+        o.lines()
+            .skip(1)
+            .any(|l| l.split_whitespace().nth(1) == Some("Doing"))
+    })
+}
+
+fn snap_disabled() -> Vec<(String, String, u64)> {
+    let Some(out) = snap_output(&["list", "--all"]) else {
+        return Vec::new();
+    };
+    parse_snap_disabled(&out)
+        .into_iter()
+        .map(|(n, r)| {
+            let size = fs::metadata(Path::new(SNAPS_DIR).join(format!("{n}_{r}.snap")))
+                .map(|m| m.blocks() * 512)
+                .unwrap_or(0);
+            (n, r, size)
+        })
+        .collect()
+}
+
+pub fn probe_snap_disabled() -> Option<(u64, u64, String)> {
+    let v = snap_disabled();
+    (!v.is_empty()).then(|| {
+        let names: Vec<String> = v.iter().map(|(n, r, _)| format!("{n} ({r})")).collect();
+        (
+            v.iter().map(|(_, _, b)| b).sum(),
+            v.len() as u64,
+            names.join(", "),
+        )
+    })
+}
+
+pub fn root_snap_disabled() -> (u64, Vec<String>) {
+    crate::root::say("• Wyłączone rewizje Snap…");
+    if snap_change_running() {
+        return (
+            0,
+            vec!["snapd wykonuje zmianę (snap changes) — pominięto".into()],
+        );
+    }
+    let mut freed = 0;
+    let mut errs = Vec::new();
+    for (name, rev, size) in snap_disabled() {
+        crate::root::say(&format!("  snap remove {name} --revision={rev}"));
+        match crate::host_command(SNAP)
+            .args(["remove", &name, &format!("--revision={rev}")])
+            .stdin(Stdio::null())
+            .status()
+        {
+            Ok(s) if s.success() => freed += size,
+            Ok(s) => errs.push(format!(
+                "snap remove {name} {rev}: kod {}",
+                s.code().unwrap_or(-1)
+            )),
+            Err(e) => errs.push(format!("snap: {e}")),
+        }
+    }
+    (freed, errs)
+}
+
+// ------------------------------------------------------------- rpm-ostree
+
+const RPM_OSTREE: &str = "/usr/bin/rpm-ostree";
+
+fn ostree_booted() -> bool {
+    Path::new("/run/ostree-booted").exists() && Path::new(RPM_OSTREE).exists()
+}
+
+/// `rpm-ostree cleanup -b -m` (interrupted operations, repo metadata cache).
+/// Rollback (-r) and pending (-p) deployments are never removed.
+pub fn probe_ostree() -> Option<(u64, u64, String)> {
+    ostree_booted().then(|| {
+        (
+            0,
+            0,
+            "przerwane operacje i cache metadanych (rozmiaru nie da się odczytać bez roota)"
+                .to_string(),
+        )
+    })
+}
+
+pub fn root_ostree() -> (u64, Vec<String>) {
+    crate::root::say("• rpm-ostree cleanup -b -m…");
+    if !ostree_booted() {
+        return (0, Vec::new());
+    }
+    let before = free_bytes("/sysroot").or_else(|| free_bytes("/"));
+    let st = crate::host_command(RPM_OSTREE)
+        .args(["cleanup", "-b", "-m"])
+        .stdin(Stdio::null())
+        .status();
+    let freed = match (before, free_bytes("/sysroot").or_else(|| free_bytes("/"))) {
+        (Some(b), Some(a)) => a.saturating_sub(b),
+        _ => 0,
+    };
+    match st {
+        Ok(s) if s.success() => (freed, Vec::new()),
+        Ok(s) => (
+            freed,
+            vec![format!("rpm-ostree: kod {}", s.code().unwrap_or(-1))],
+        ),
+        Err(e) => (0, vec![format!("rpm-ostree: {e}")]),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -480,6 +625,22 @@ mod tests {
         assert!(!d.join("a.crash").exists());
         assert!(keep.exists());
         fs::remove_dir_all(&d).unwrap();
+    }
+
+    #[test]
+    fn snap_list_all_parsing() {
+        let out = "Name    Version   Rev    Tracking       Publisher   Notes\n\
+                   core22  20240111  1122   latest/stable  canonical✓  base,disabled\n\
+                   core22  20240408  1380   latest/stable  canonical✓  base\n\
+                   firefox 126.0     4259   latest/stable  mozilla✓    disabled\n\
+                   firefox 127.0     4336   latest/stable  mozilla✓    -\n";
+        assert_eq!(
+            parse_snap_disabled(out),
+            vec![
+                ("core22".into(), "1122".into()),
+                ("firefox".into(), "4259".into())
+            ]
+        );
     }
 
     #[test]
