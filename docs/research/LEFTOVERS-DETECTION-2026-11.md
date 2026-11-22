@@ -197,7 +197,7 @@ Notes:
 
 ## 3. XUninstaller identity engine (MIT, reuse allowed)
 
-Path: `/home/anon/Pobrane/test/xu-integration/crates/xuninstaller-core/src/identity/`.
+Path: XUninstaller repository, `crates/xuninstaller-core/src/identity/`.
 Design docs in the same repo under `docs/research/`: `FILE-IDENTIFICATION-2026-11.md` (the 10-agent
 synthesis), `FILE-LEFTOVERS-2026-11.md` (evidence model, Mullvad case), and
 `RESEARCH-WAVE2-2026-11.md` (sections 06 Electron, 17 AUR caches, 20/21 KDE/GNOME).
