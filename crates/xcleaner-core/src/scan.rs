@@ -423,6 +423,12 @@ fn root_found() -> Vec<Found> {
                     format!("apt-get clean ({}): usuwa wszystkie pobrane .deb. Bez internetu nie da się ich wtedy przeinstalować z cache.", p.detail),
                     Regen::Slow,
                 ),
+                RootTask::CrashReports => (
+                    "root:crash-reports",
+                    "Raporty awarii (apport / ABRT)",
+                    format!("{}. Potrzebne tylko do zgłaszania błędów; zrzuty kdump po panice kernela zostają.", p.detail),
+                    Regen::Never,
+                ),
                 RootTask::KernelModules => (
                     "root:kernel-modules",
                     "Moduły po usuniętych kernelach",

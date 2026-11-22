@@ -316,9 +316,171 @@ pub fn root_flatpak_unused() -> (u64, Vec<String>) {
     }
 }
 
+// ---------------------------------------------------------- crash reports
+
+const APPORT_DIR: &str = "/var/crash";
+const ABRT_DIR: &str = "/var/spool/abrt";
+/// A report touched this recently may still be written by apport/whoopsie.
+const FRESH_SECS: u64 = 300;
+
+pub fn is_apport_report(name: &str) -> bool {
+    [".crash", ".upload", ".uploaded"]
+        .iter()
+        .any(|s| name.ends_with(s) && name.len() > s.len())
+}
+
+/// Regular apport report files at the top of /var/crash (kdump's
+/// `/var/crash/<date>/` dirs are never touched).
+fn apport_reports() -> Vec<(String, u64)> {
+    let fresh = SystemTime::now() - Duration::from_secs(FRESH_SECS);
+    let Ok(rd) = fs::read_dir(APPORT_DIR) else {
+        return Vec::new();
+    };
+    let mut v: Vec<(String, u64)> = rd
+        .flatten()
+        .filter_map(|e| {
+            let name = e.file_name().into_string().ok()?;
+            let m = fs::symlink_metadata(e.path()).ok()?;
+            (m.is_file() && is_apport_report(&name) && m.modified().is_ok_and(|t| t < fresh))
+                .then(|| (name, m.blocks() * 512))
+        })
+        .collect();
+    v.sort();
+    v
+}
+
+fn abrt_bin() -> Option<(&'static str, &'static str)> {
+    [("/usr/bin/abrt", "remove"), ("/usr/bin/abrt-cli", "rm")]
+        .into_iter()
+        .find(|(b, _)| Path::new(b).exists())
+}
+
+/// ABRT problem directories (removed only through the abrt CLI).
+fn abrt_problems() -> Vec<(PathBuf, u64)> {
+    if abrt_bin().is_none() {
+        return Vec::new();
+    }
+    let Ok(rd) = fs::read_dir(ABRT_DIR) else {
+        return Vec::new();
+    };
+    rd.flatten()
+        .filter(|e| fs::symlink_metadata(e.path()).is_ok_and(|m| m.is_dir()))
+        .map(|e| {
+            let size = Home::open(Path::new(ABRT_DIR))
+                .ok()
+                .and_then(|h| h.measure(Path::new(&e.file_name())).ok().flatten())
+                .map(|u| u.bytes)
+                .unwrap_or(0);
+            (e.path(), size)
+        })
+        .collect()
+}
+
+pub fn probe_crash_reports() -> Option<(u64, u64, String)> {
+    let a = apport_reports();
+    let b = abrt_problems();
+    let bytes = a.iter().map(|(_, s)| s).sum::<u64>() + b.iter().map(|(_, s)| s).sum::<u64>();
+    let mut parts = Vec::new();
+    if !a.is_empty() {
+        parts.push(format!("apport: {} raportów w {APPORT_DIR}", a.len()));
+    }
+    if !b.is_empty() {
+        parts.push(format!("ABRT: {} problemów w {ABRT_DIR}", b.len()));
+    }
+    (!parts.is_empty()).then(|| (bytes, (a.len() + b.len()) as u64, parts.join("; ")))
+}
+
+/// unlinkat relative to an O_NOFOLLOW handle of /var/crash: the directory
+/// is world-writable (sticky), so nothing is resolved through a path.
+fn unlink_in(dir: &str, names: &[(String, u64)]) -> (u64, Vec<String>) {
+    let Ok(c) = std::ffi::CString::new(dir) else {
+        return (0, Vec::new());
+    };
+    let fd = unsafe {
+        libc::open(
+            c.as_ptr(),
+            libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+        )
+    };
+    if fd < 0 {
+        return (
+            0,
+            vec![format!("{dir}: {}", std::io::Error::last_os_error())],
+        );
+    }
+    let mut freed = 0;
+    let mut errs = Vec::new();
+    for (name, _) in names {
+        let Ok(n) = std::ffi::CString::new(name.as_str()) else {
+            continue;
+        };
+        let mut st: libc::stat = unsafe { std::mem::zeroed() };
+        if unsafe { libc::fstatat(fd, n.as_ptr(), &mut st, libc::AT_SYMLINK_NOFOLLOW) } != 0
+            || st.st_mode & libc::S_IFMT != libc::S_IFREG
+        {
+            continue;
+        }
+        if unsafe { libc::unlinkat(fd, n.as_ptr(), 0) } == 0 {
+            if st.st_nlink <= 1 {
+                freed += st.st_blocks as u64 * 512;
+            }
+        } else {
+            errs.push(format!("{name}: {}", std::io::Error::last_os_error()));
+        }
+    }
+    unsafe { libc::close(fd) };
+    (freed, errs)
+}
+
+pub fn root_crash_reports() -> (u64, Vec<String>) {
+    crate::root::say("• Raporty awarii (apport / ABRT)…");
+    let (mut freed, mut errs) = unlink_in(APPORT_DIR, &apport_reports());
+    if let Some((bin, sub)) = abrt_bin() {
+        for (dir, size) in abrt_problems() {
+            match crate::host_command(bin)
+                .arg(sub)
+                .arg(&dir)
+                .stdin(Stdio::null())
+                .status()
+            {
+                Ok(s) if s.success() => freed += size,
+                Ok(s) => errs.push(format!(
+                    "{bin} {sub} {}: kod {}",
+                    dir.display(),
+                    s.code().unwrap_or(-1)
+                )),
+                Err(e) => errs.push(format!("{bin}: {e}")),
+            }
+        }
+    }
+    (freed, errs)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn apport_names_and_safe_unlink() {
+        assert!(is_apport_report("_usr_bin_foo.1000.crash"));
+        assert!(is_apport_report("_usr_bin_foo.1000.upload"));
+        assert!(!is_apport_report(".crash"));
+        assert!(!is_apport_report("202511221200"));
+        let d = std::env::temp_dir().join(format!("xc-crash-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&d);
+        fs::create_dir_all(&d).unwrap();
+        fs::write(d.join("a.crash"), b"x").unwrap();
+        let keep = d.join("keep");
+        fs::write(&keep, b"x").unwrap();
+        // A symlink planted under a report name is not followed.
+        std::os::unix::fs::symlink(&keep, d.join("b.crash")).unwrap();
+        let names = vec![("a.crash".to_string(), 0), ("b.crash".to_string(), 0)];
+        let (_, errs) = unlink_in(&d.to_string_lossy(), &names);
+        assert!(errs.is_empty());
+        assert!(!d.join("a.crash").exists());
+        assert!(keep.exists());
+        fs::remove_dir_all(&d).unwrap();
+    }
 
     #[test]
     fn rotated_log_names() {

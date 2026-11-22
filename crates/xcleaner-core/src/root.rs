@@ -53,10 +53,12 @@ pub enum RootTask {
     PkgCache,
     /// `apt-get clean`: every downloaded .deb (opt-in only).
     AptClean,
+    /// apport reports in /var/crash, ABRT problems via its CLI.
+    CrashReports,
 }
 
 impl RootTask {
-    pub const ALL: [RootTask; 11] = [
+    pub const ALL: [RootTask; 12] = [
         RootTask::Coredumps,
         RootTask::PacmanCache,
         RootTask::PacmanCacheAll,
@@ -68,6 +70,7 @@ impl RootTask {
         RootTask::FlatpakUnused,
         RootTask::PkgCache,
         RootTask::AptClean,
+        RootTask::CrashReports,
     ];
 
     /// Where the task works (for display).
@@ -82,6 +85,7 @@ impl RootTask {
             RootTask::FlatpakUnused => "/var/lib/flatpak",
             RootTask::PkgCache => "/var/cache",
             RootTask::AptClean => "/var/cache/apt/archives",
+            RootTask::CrashReports => "/var/crash",
         }
     }
 
@@ -98,6 +102,7 @@ impl RootTask {
             RootTask::FlatpakUnused => "flatpak-unused",
             RootTask::PkgCache => "pkg-cache",
             RootTask::AptClean => "apt-clean",
+            RootTask::CrashReports => "crash-reports",
         }
     }
 
@@ -821,6 +826,7 @@ pub fn run_root(args: &[String]) -> i32 {
             RootTask::FlatpakUnused => crate::sysclean::root_flatpak_unused(),
             RootTask::PkgCache => crate::pkgcache::root_clean(),
             RootTask::AptClean => crate::pkgcache::root_apt_clean(),
+            RootTask::CrashReports => crate::sysclean::root_crash_reports(),
         };
         report.line("freed", t, &freed.to_string());
         for e in &errs {
