@@ -313,7 +313,7 @@ fn item_row(f: &Found) -> (adw::ActionRow, gtk::CheckButton) {
 fn target_list(it: &Item) -> String {
     it.targets
         .iter()
-        .map(|(p, _)| format!("~/{}", p.display()))
+        .map(|(p, a)| xcleaner_core::rules::target_label(p, a))
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -370,6 +370,12 @@ fn confirm_clean(state: &Rc<State>) {
         )
     } else {
         "Usunięcia nie można cofnąć. Konfiguracja i dane osobiste nie są ruszane.".to_string()
+    };
+    let root = sel.iter().any(|f| f.item.category == Category::SystemRoot);
+    let note = if root {
+        format!("{note}\n\nDo czyszczenia systemu otworzy się terminal — wpisz tam hasło sudo.")
+    } else {
+        note
     };
     let dialog = adw::AlertDialog::new(
         Some(&format!("Usunąć {}?", format_size(bytes))),
@@ -465,6 +471,18 @@ fn show_details(state: &Rc<State>, f: &Found) {
         .build();
     page.add(&about);
     let paths = adw::PreferencesGroup::builder().title("Ścieżki").build();
+    for (rel, action) in it
+        .targets
+        .iter()
+        .filter(|(_, a)| matches!(a, xcleaner_core::rules::Action::Root(_)))
+    {
+        paths.add(
+            &adw::ActionRow::builder()
+                .title(xcleaner_core::rules::target_label(rel, action))
+                .subtitle("katalog systemowy — czyszczony przez sudo")
+                .build(),
+        );
+    }
     for (rel, u) in &f.parts {
         let row = adw::ActionRow::builder()
             .title(glib::markup_escape_text(&format!("~/{}", rel.display())).as_str())

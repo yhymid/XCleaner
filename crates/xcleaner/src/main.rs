@@ -19,6 +19,15 @@ fn main() -> std::process::ExitCode {
             println!("XCleaner {}", env!("CARGO_PKG_VERSION"));
             std::process::ExitCode::SUCCESS
         }
+        Some(xcleaner_core::root::ROOT_ARG) => {
+            let rest: Vec<String> = args
+                .iter()
+                .skip_while(|a| *a != xcleaner_core::root::ROOT_ARG)
+                .skip(1)
+                .cloned()
+                .collect();
+            std::process::ExitCode::from(xcleaner_core::root::run_root(&rest) as u8)
+        }
         Some("--usage") | Some("--scan") => {
             xcleaner_core::default_sigpipe();
             if first == Some("--usage") {
@@ -111,8 +120,11 @@ fn cli_scan(details: bool) -> std::process::ExitCode {
             for l in f.item.description.lines() {
                 println!("               │ {l}");
             }
-            for (t, _) in &f.item.targets {
-                println!("               · ~/{}", t.display());
+            for (t, a) in &f.item.targets {
+                println!(
+                    "               · {}",
+                    xcleaner_core::rules::target_label(t, a)
+                );
             }
         }
         if let Some(b) = &f.blocked {

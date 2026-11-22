@@ -345,6 +345,73 @@ pub(crate) fn parallel_map<T: Sync, R: Send>(items: &[T], f: impl Fn(&T) -> R + 
     out.into_iter().map(|(_, r)| r).collect()
 }
 
+/// Phase 2 items, measured read-only (no password needed to look).
+fn root_found() -> Vec<Found> {
+    use crate::root::RootTask;
+    crate::root::probe_all()
+        .into_iter()
+        .map(|p| {
+            let (id, name, desc, regen) = match p.task {
+                RootTask::Coredumps => (
+                    "root:coredumps",
+                    "Zrzuty awarii programów (coredumpy)",
+                    format!("/var/lib/systemd/coredump — {}. Potrzebne tylko do zgłaszania błędów.", p.detail),
+                    Regen::Never,
+                ),
+                RootTask::PacmanCache => (
+                    "root:pacman-cache",
+                    "Cache pacmana (stare wersje paczek)",
+                    format!("paccache -rk2: zostają 2 ostatnie wersje każdej paczki (downgrade dalej możliwy) — {}.", p.detail),
+                    Regen::Never,
+                ),
+                RootTask::PacmanCacheAll => (
+                    "root:pacman-cache-all",
+                    "Cache pacmana — także aktualne wersje",
+                    format!("paccache -rk0 ({}): usuwa wszystkie pobrane paczki. Bez internetu nie da się ich wtedy przeinstalować ani cofnąć aktualizacji z cache.", p.detail),
+                    Regen::Slow,
+                ),
+                RootTask::KernelModules => (
+                    "root:kernel-modules",
+                    "Moduły po usuniętych kernelach",
+                    format!("/usr/lib/modules: {} — żaden pakiet ich nie posiada, działający kernel nie jest ruszany.", p.detail),
+                    Regen::Never,
+                ),
+            };
+            Found {
+                item: Item {
+                    id: id.into(),
+                    name: name.into(),
+                    description: desc,
+                    category: Category::SystemRoot,
+                    risk: if p.task == RootTask::PacmanCacheAll {
+                        Risk::Review
+                    } else {
+                        Risk::Safe
+                    },
+                    regen,
+                    targets: vec![(PathBuf::from(p.task.arg()), Action::Root(p.task))],
+                    guards: if matches!(p.task, RootTask::PacmanCache | RootTask::PacmanCacheAll) {
+                        vec!["pacman".into(), "yay".into(), "paru".into()]
+                    } else {
+                        Vec::new()
+                    },
+                    singleton_lock: None,
+                    media_check: false,
+                    preselect: false,
+                },
+                usage: Usage {
+                    bytes: p.bytes,
+                    files: p.files,
+                    ..Usage::default()
+                },
+                parts: Vec::new(),
+                blocked: None,
+                errors: Vec::new(),
+            }
+        })
+        .collect()
+}
+
 /// Discover and measure everything. Items that are empty or missing are dropped.
 pub fn scan(layout: &Layout) -> std::io::Result<ScanResult> {
     let start = Instant::now();
@@ -379,6 +446,9 @@ pub fn scan(layout: &Layout) -> std::io::Result<ScanResult> {
         }
     }
     found.retain(|f| f.usage.files > 0 || !f.errors.is_empty());
+    if std::env::var_os("XCLEANER_NO_ROOT").is_none() {
+        found.extend(root_found());
+    }
     let keep = crate::keep::KeepList::load();
     let before = found.len();
     found.retain(|f| !keep.contains(&f.item.id));
@@ -422,6 +492,7 @@ pub fn clean(layout: &Layout, items: &[Item]) -> std::io::Result<CleanReport> {
     let procs = Processes::snapshot();
     let mut rep = CleanReport::default();
     let mut log = Vec::new();
+    let mut root_tasks: Vec<(crate::root::RootTask, String)> = Vec::new();
     let ts = crate::history::stamp(crate::history::now());
     for item in items {
         let freed_before = rep.freed.bytes;
@@ -431,6 +502,10 @@ pub fn clean(layout: &Layout, items: &[Item]) -> std::io::Result<CleanReport> {
             continue;
         }
         for (rel, action) in &item.targets {
+            if let Action::Root(t) = action {
+                root_tasks.push((*t, item.id.clone()));
+                continue;
+            }
             if let Some(why) = crate::protect::refusal(rel) {
                 rep.errors
                     .push(format!("{}: odmowa — {why}", rel.display()));
@@ -441,6 +516,7 @@ pub fn clean(layout: &Layout, items: &[Item]) -> std::io::Result<CleanReport> {
                 Action::ClearDirKeep(keep) => home.clear_dir_keep(rel, keep),
                 Action::RemoveFile => home.remove_file(rel),
                 Action::RemoveDir => home.remove_dir(rel),
+                Action::Root(_) => unreachable!("handled above"),
             };
             match r {
                 Ok(d) => {
@@ -458,7 +534,7 @@ pub fn clean(layout: &Layout, items: &[Item]) -> std::io::Result<CleanReport> {
         let targets: Vec<String> = item
             .targets
             .iter()
-            .map(|(p, _)| format!("~/{}", p.display()))
+            .map(|(p, a)| crate::rules::target_label(p, a))
             .collect();
         log.push(format!(
             "{ts}\t{}\tzwolniono {}\tbłędy {}\t{}",
@@ -466,6 +542,26 @@ pub fn clean(layout: &Layout, items: &[Item]) -> std::io::Result<CleanReport> {
             crate::format_size(rep.freed.bytes - freed_before),
             rep.errors.len() - errors_before,
             targets.join(" ")
+        ));
+    }
+    if !root_tasks.is_empty() {
+        let tasks: Vec<_> = root_tasks.iter().map(|(t, _)| *t).collect();
+        let o = crate::root::launch(&tasks);
+        rep.freed.bytes += o.freed;
+        rep.errors
+            .extend(o.errors.iter().map(|e| format!("system: {e}")));
+        if let Some(n) = &o.not_done {
+            rep.blocked.push(format!("System: {n}"));
+        }
+        log.push(format!(
+            "{ts}\t{}\tzwolniono {}\tbłędy {}\t(sudo)",
+            root_tasks
+                .iter()
+                .map(|(_, id)| id.as_str())
+                .collect::<Vec<_>>()
+                .join(","),
+            crate::format_size(o.freed),
+            o.errors.len()
         ));
     }
     for b in &rep.blocked {
@@ -492,6 +588,7 @@ mod tests {
     #[test]
     fn discovers_electron_and_cachedir_tag_but_not_login_data() {
         std::env::set_var("XCLEANER_NO_HISTORY", "1");
+        std::env::set_var("XCLEANER_NO_ROOT", "1");
         std::env::set_var("XCLEANER_KEEP_FILE", "/nonexistent/xcleaner-keep.txt");
         let home = tmp("disc");
         let app = home.join(".config/someapp");

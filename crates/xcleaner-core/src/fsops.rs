@@ -282,33 +282,39 @@ impl Home {
 
     /// Delete a whole directory tree including the directory itself.
     pub fn remove_dir(&self, rel: &Path) -> io::Result<DeleteReport> {
-        let parent = rel
-            .parent()
-            .filter(|p| !p.as_os_str().is_empty())
-            .ok_or_else(|| {
-                io::Error::new(io::ErrorKind::InvalidInput, "directory directly in HOME")
-            })?;
         let name = rel
             .file_name()
             .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "no directory name"))?;
-        let pfd = self.open_target(
-            parent,
-            libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW,
-        )?;
+        let opened;
+        // A direct child of the base uses the base's O_PATH descriptor,
+        // which is a valid dirfd for fstatat/openat/unlinkat.
+        let pfd = match rel.parent().filter(|p| !p.as_os_str().is_empty()) {
+            Some(parent) => {
+                opened = self.open_target(
+                    parent,
+                    libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW,
+                )?;
+                opened.as_raw_fd()
+            }
+            None => {
+                checked_rel(rel)?;
+                self.fd.as_raw_fd()
+            }
+        };
         let cname = cstr(name.as_bytes())?;
-        let st = match fstatat(pfd.as_raw_fd(), &cname) {
+        let st = match fstatat(pfd, &cname) {
             Ok(st) => st,
             Err(e) if e.raw_os_error() == Some(libc::ENOENT) => return Ok(DeleteReport::default()),
             Err(e) => return Err(e),
         };
-        let pst = fstat(pfd.as_raw_fd())?;
+        let pst = fstat(pfd)?;
         if !is_dir(&st) || st.st_uid != self.uid || st.st_dev != pst.st_dev {
             return Err(io::Error::new(
                 io::ErrorKind::PermissionDenied,
                 "not a user-owned directory",
             ));
         }
-        let child = open_child_dir(pfd.as_raw_fd(), &cname)?;
+        let child = open_child_dir(pfd, &cname)?;
         let cst = fstat(child.as_raw_fd())?;
         if cst.st_ino != st.st_ino || cst.st_dev != st.st_dev {
             return Err(io::Error::new(
@@ -319,7 +325,7 @@ impl Home {
         let mut rep = DeleteReport::default();
         if clear_contents(child.as_raw_fd(), st.st_dev, self.uid, 0, &[], &mut rep) {
             drop(child);
-            unlink(pfd.as_raw_fd(), &cname, true)?;
+            unlink(pfd, &cname, true)?;
             rep.freed.bytes += st.st_blocks as u64 * 512;
             rep.freed.dirs += 1;
         }

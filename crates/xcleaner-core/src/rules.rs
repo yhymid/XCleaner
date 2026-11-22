@@ -11,19 +11,21 @@ pub enum Category {
     Leftovers,
     Projects,
     Development,
+    SystemRoot,
     Games,
     Trash,
     Privacy,
 }
 
 impl Category {
-    pub const ALL: [Category; 9] = [
+    pub const ALL: [Category; 10] = [
         Category::System,
         Category::Browsers,
         Category::Apps,
         Category::Leftovers,
         Category::Projects,
         Category::Development,
+        Category::SystemRoot,
         Category::Games,
         Category::Trash,
         Category::Privacy,
@@ -37,6 +39,7 @@ impl Category {
             Category::Leftovers => "Pozostałości po odinstalowanych aplikacjach",
             Category::Projects => "Projekty — artefakty budowania",
             Category::Development => "Programowanie i pakiety",
+            Category::SystemRoot => "System (wymaga hasła sudo)",
             Category::Games => "Gry",
             Category::Trash => "Kosz",
             Category::Privacy => "Prywatność",
@@ -103,6 +106,8 @@ pub enum Action {
     RemoveFile,
     /// Delete the directory together with everything in it.
     RemoveDir,
+    /// Done by the root helper (`sudo` in a terminal), never in-process.
+    Root(crate::root::RootTask),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -382,6 +387,14 @@ pub struct Item {
     /// Selected by default even though the risk is not Safe (owner decision
     /// for leftovers without personal data).
     pub preselect: bool,
+}
+
+/// How a target is shown to the user.
+pub fn target_label(path: &std::path::Path, action: &Action) -> String {
+    match action {
+        Action::Root(t) => t.location().to_string(),
+        _ => format!("~/{}", path.display()),
+    }
 }
 
 impl Item {

@@ -9,6 +9,7 @@ pub mod keep;
 pub mod leftovers;
 pub mod procs;
 pub mod protect;
+pub mod root;
 pub mod rules;
 pub mod scan;
 pub mod usage;
