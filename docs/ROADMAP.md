@@ -122,6 +122,33 @@ maszyny, a UPSTREAM-CLEANERS opisuje BleachBit, czkawka, kondo, CCleaner i inne.
 - [ ] Na v0.2.0: `/var/tmp`, nieużywane runtime’y Flatpak (`flatpak uninstall --unused`),
   journald według czasu, zrotowane logi w `/var/log`, coredumpy z innych dystrybucji.
 
+## v0.2.0 — wszystkie dystrybucje (plan z researchu 2026-11-22)
+Źródła: `docs/research/DISTRO-*-2026-11.md`. Pozycje oznaczone tam [NZ]/(niezweryf.)
+sprawdzamy w VM w v0.3.0.
+
+1. [x] Bezpieczeństwo: stanowe katalogi w `~/.cache` (sesje XFCE, schowek xfce4, obexd, ibus,
+   JetBrains Local History, kioexec, evolution, tracker3) — nigdy domyślnie zaznaczone.
+2. [ ] Przenośny build:
+   - `gtk4 v4_10` + `adw v1_5`, `adw::Spinner` → `gtk::Spinner`;
+   - AppImage budowany w kontenerze `ubuntu:24.04` (glibc 2.39 zamiast 2.44).
+3. [ ] Środowisko AppImage nie przecieka do programów systemu: `GI_TYPELIB_PATH`, `XDG_DATA_DIRS`,
+   `APPDIR`, `APPIMAGE`, `ARGV0`, `OWD`, `FUSERMOUNT_PROG`, także przy otwieraniu menedżera plików.
+4. [ ] Terminale: argv dla każdego (gnome-terminal `--wait`, konsole `--separate`, xfce4 `--disable-server`…),
+   wrapper zapisujący PID i kod wyjścia do raportu, GUI sprawdza, czy PID żyje.
+5. [ ] Eskalacja bez polkit: sudo → doas → `su -c`; jawne `--uid` zamiast `SUDO_UID`.
+6. [ ] Ochrona Steam dla każdego roota (`~/.steam/debian-installation`, Flatpak, Snap); nowe blokady
+   (`gvfs-metadata`, `nautilus/tags`, akonadi, kactivitymanagerd, evolution).
+7. [ ] Reguły pulpitów: ksycoca/QML/kcache KDE, Snap `~/snap/*/common/.cache`, Flatpak per-app cache
+   z wyjątkami stanowymi, `Trash/directorysizes`.
+8. [ ] Blokady menedżerów pakietów przez `/proc/locks` (dpkg, rpm, xbps, apk), `/run/zypp.pid`.
+9. [ ] Moduł menedżera pakietów (`PackageBackend`) wybierany po istniejących bazach:
+   dpkg, rpm + dnf4/dnf5, zypper; xbps/apk/Nix tylko „zainstalowane” (bez pozostałości).
+10. [ ] Zadania systemowe: cache apt/dnf/zypper/xbps/apk/eclean, journald, zrotowane logi,
+    raporty awarii (apport/ABRT), `flatpak uninstall --unused`, wyłączone rewizje Snap,
+    `rpm-ostree cleanup`, stare moduły kernela na innych dystrybucjach.
+    Stare kernele tylko po podglądzie, nigdy domyślnie; bez `autoremove`.
+11. [ ] Wydanie: AppImage + `.deb` + `.rpm` + `.pkg.tar.zst` + `SHA256SUMS`.
+
 ## Nigdy
 - Wymazywanie RAM, swapu i wolnego miejsca, „shred”.
 - Menedżer autostartu.

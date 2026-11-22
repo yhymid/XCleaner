@@ -210,7 +210,23 @@ pub fn discord_items(layout: &Layout) -> Vec<Item> {
 // ---------------------------------------------------- rest of ~/.cache
 
 /// Cache entries that hold state despite living in XDG_CACHE_HOME.
-const CACHE_STATEFUL: &[&str] = &["keepassxc"];
+/// ~/.cache entries that hold user state, not cache (see
+/// docs/research/DISTRO-DESKTOPS-TERMINALS-2026-11.md): never preselected.
+const CACHE_STATEFUL: &[&str] = &[
+    "keepassxc",
+    "sessions",  // XFCE saved sessions
+    "xfce4",     // clipman / appfinder history
+    "obexd",     // files received over Bluetooth
+    "ibus",      // libpinyin / libbopomofo user dictionaries
+    "JetBrains", // IDE Local History
+    "kioexec",   // copies of remote files being edited
+    "evolution", // offline mail copies, may hold unsynced changes
+    "tracker3",  // rebuilds, but costs a full reindex and loses tags
+];
+
+fn is_stateful_cache(name: &str) -> bool {
+    CACHE_STATEFUL.iter().any(|s| s.eq_ignore_ascii_case(name))
+}
 
 /// One item per top-level entry of XDG_CACHE_HOME not handled by a named
 /// rule. The XDG spec defines this directory as non-essential data.
@@ -237,7 +253,7 @@ pub fn cache_rest_items(layout: &Layout, covered: &[PathBuf]) -> Vec<Item> {
         } else {
             continue;
         };
-        let stateful = CACHE_STATEFUL.iter().any(|s| s.eq_ignore_ascii_case(&name));
+        let stateful = is_stateful_cache(&name);
         let mut it = item(
             format!("cache:{name}"),
             name.to_string(),
@@ -468,6 +484,21 @@ pub fn dead_launcher_items(layout: &Layout) -> Vec<Item> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stateful_cache_dirs_are_never_preselected() {
+        for n in [
+            "JetBrains",
+            "jetbrains",
+            "sessions",
+            "obexd",
+            "tracker3",
+            "keepassxc",
+        ] {
+            assert!(is_stateful_cache(n), "{n}");
+        }
+        assert!(!is_stateful_cache("fontconfig"));
+    }
 
     #[test]
     fn acf_and_ids() {
