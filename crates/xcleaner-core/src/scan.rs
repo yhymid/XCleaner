@@ -441,6 +441,12 @@ fn root_found() -> Vec<Found> {
                     format!("rpm-ostree cleanup -b -m: {}. Wdrożenie do cofnięcia (rollback) zostaje.", p.detail),
                     Regen::Never,
                 ),
+                RootTask::OldKernels => (
+                    "root:old-kernels",
+                    "Stare kernele",
+                    format!("{}. Usuwane wyłącznie menedżerem pakietów (hooki zaktualizują bootloader); działający kernel zostaje. Sprawdź listę przed usunięciem.", p.detail),
+                    Regen::Never,
+                ),
                 RootTask::KernelModules => (
                     "root:kernel-modules",
                     "Moduły po usuniętych kernelach",
@@ -454,7 +460,10 @@ fn root_found() -> Vec<Found> {
                     name: name.into(),
                     description: desc,
                     category: Category::SystemRoot,
-                    risk: if matches!(p.task, RootTask::PacmanCacheAll | RootTask::AptClean) {
+                    risk: if matches!(
+                        p.task,
+                        RootTask::PacmanCacheAll | RootTask::AptClean | RootTask::OldKernels
+                    ) {
                         Risk::Review
                     } else {
                         Risk::Safe

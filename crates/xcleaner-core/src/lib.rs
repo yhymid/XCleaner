@@ -6,6 +6,7 @@ pub mod extra;
 pub mod fsops;
 pub mod history;
 pub mod keep;
+pub mod kernels;
 pub mod leftovers;
 pub mod locks;
 pub mod pkgcache;
