@@ -46,6 +46,7 @@ fn item(
         guards: Vec::new(),
         singleton_lock: None,
         media_check: false,
+        preselect: false,
     }
 }
 

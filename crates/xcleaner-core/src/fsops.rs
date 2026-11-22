@@ -41,6 +41,9 @@ pub struct Usage {
     pub dirs: u64,
     /// Bytes in audio/video files (music in a "cache" is user data).
     pub media_bytes: u64,
+    /// Bytes of files with more than one hard link: deleting this tree may
+    /// not free them (other links can live elsewhere, e.g. pnpm store).
+    pub shared_bytes: u64,
 }
 
 impl Usage {
@@ -49,6 +52,7 @@ impl Usage {
         self.files += other.files;
         self.dirs += other.dirs;
         self.media_bytes += other.media_bytes;
+        self.shared_bytes += other.shared_bytes;
     }
 
     /// More than half of the space is audio/video.
@@ -390,6 +394,9 @@ fn measure_dir(
             continue;
         }
         let b = st.st_blocks as u64 * 512;
+        if st.st_nlink > 1 {
+            usage.shared_bytes += b;
+        }
         usage.bytes += b;
         usage.files += 1;
         if is_media(name.to_bytes()) {

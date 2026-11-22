@@ -6,14 +6,22 @@ use xcleaner_core::{format_size, scan};
 
 fn main() -> std::process::ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    match args.first().map(String::as_str) {
+    if args.iter().any(|a| a == "--no-files-db") {
+        // Read by xcleaner-core before any thread starts.
+        std::env::set_var("XCLEANER_NO_FILES_DB", "1");
+    }
+    let first = args
+        .iter()
+        .find(|a| *a != "--no-files-db")
+        .map(String::as_str);
+    match first {
         Some("--version") => {
             println!("XCleaner {}", env!("CARGO_PKG_VERSION"));
             std::process::ExitCode::SUCCESS
         }
         Some("--scan") => cli_scan(args.iter().any(|a| a == "--details")),
         Some("--help") | Some("-h") => {
-            println!("XCleaner {}\n\n  xcleaner          okno programu\n  xcleaner --scan [--details]   raport w terminalu (nic nie usuwa)", env!("CARGO_PKG_VERSION"));
+            println!("XCleaner {}\n\n  xcleaner          okno programu\n  xcleaner --scan [--details]   raport w terminalu (nic nie usuwa)\n  --no-files-db                 bez `pacman -Fl` (stare wykrywanie resztek)", env!("CARGO_PKG_VERSION"));
             std::process::ExitCode::SUCCESS
         }
         _ => {

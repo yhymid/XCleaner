@@ -152,8 +152,25 @@ const ALIASES: &[(&str, &[&str])] = &[
     ("dorion", &["com.spikehd.dorion"]),
 ];
 
+/// File extensions that mean an installed game or a save inside a leftover.
+const PERSONAL_EXT: &[&str] = &["exe", "sav", "save", "kdbx", "wallet"];
+
 /// Signs of personal data inside a leftover (shown as a warning).
 const PERSONAL_MARKERS: &[&str] = &[
+    "save",
+    "BSInstances",
+    "SharedMaps",
+    "Playlists",
+    "compatdata",
+    "game_data",
+    "screenshots",
+    "Screenshots",
+    "captures",
+    "threads",
+    "prompts",
+    "Downloads",
+    "Documents",
+    "backups",
     "Cookies",
     "Login Data",
     "places.sqlite",
@@ -293,6 +310,102 @@ impl Evidence {
         }
     }
 
+    /// Names a removed package's files create (binaries, desktop IDs, /opt
+    /// and /etc/xdg dirs), from the sync files DB: `pacman -Fl <removed…>`.
+    /// Catches renames such as profile-sync-daemon → psd.
+    pub fn add_files_db_aliases(&mut self) {
+        let mut pkgs: Vec<String> = self.removed.values().map(|r| r.package.clone()).collect();
+        pkgs.sort();
+        pkgs.dedup();
+        if pkgs.is_empty() {
+            return;
+        }
+        // Cache keyed by the files DB timestamps and the removed set: the
+        // query takes seconds, the answer only changes after -Fy or a removal.
+        let mut key = pkgs.join(" ");
+        if let Ok(rd) = fs::read_dir("/var/lib/pacman/sync") {
+            let mut stamps: Vec<String> = rd
+                .flatten()
+                .filter(|e| e.file_name().to_string_lossy().ends_with(".files"))
+                .filter_map(|e| {
+                    let m = e.metadata().ok()?.modified().ok()?;
+                    let t = m.duration_since(UNIX_EPOCH).ok()?.as_secs();
+                    Some(format!("{}={t}", e.file_name().to_string_lossy()))
+                })
+                .collect();
+            stamps.sort();
+            key = format!("{} | {key}", stamps.join(","));
+        }
+        let cache = std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .map(|h| h.join(".cache/xcleaner/files-db-aliases-v1.txt"));
+        if let Some(c) = &cache {
+            if let Ok(t) = fs::read_to_string(c) {
+                if let Some((k, body)) = t.split_once('\n') {
+                    if k == key {
+                        self.add_files_listing(body);
+                        return;
+                    }
+                }
+            }
+        }
+        let Ok(out) = std::process::Command::new("pacman")
+            .arg("-Fl")
+            .args(&pkgs)
+            .env("LC_ALL", "C")
+            .stderr(std::process::Stdio::null())
+            .output()
+        else {
+            return;
+        };
+        let text = String::from_utf8_lossy(&out.stdout);
+        // Keep only lines that yield an identity; the cache stays tiny.
+        let body: String = text
+            .lines()
+            .filter(|l| {
+                l.split_once(' ')
+                    .is_some_and(|(_, p)| !path_identities(p).is_empty())
+            })
+            .map(|l| format!("{l}\n"))
+            .collect();
+        if let Some(c) = &cache {
+            if let Some(dir) = c.parent() {
+                let _ = fs::create_dir_all(dir);
+            }
+            let _ = fs::write(c, format!("{key}\n{body}"));
+        }
+        self.add_files_listing(&body);
+    }
+
+    /// Parse `pkg path` lines (pacman -Fl output) into aliases of removed packages.
+    pub fn add_files_listing(&mut self, listing: &str) {
+        let by_pkg: HashMap<String, Removed> = self
+            .removed
+            .values()
+            .map(|r| (r.package.clone(), r.clone()))
+            .collect();
+        for line in listing.lines() {
+            let Some((pkg, path)) = line.split_once(' ') else {
+                continue;
+            };
+            let Some(r) = by_pkg.get(pkg) else { continue };
+            for alias in path_identities(path) {
+                let a = squash(&alias);
+                if a.len() >= 3 {
+                    self.removed.entry(a).or_insert_with(|| r.clone());
+                }
+                if alias.matches('.').count() >= 2 {
+                    if let Some(leaf) = alias.rsplit('.').next() {
+                        let l = squash(leaf);
+                        if l.len() >= 3 {
+                            self.removed.entry(l).or_insert_with(|| r.clone());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     fn add_installed(&mut self, name: &str) {
         let s = squash(name);
         if !s.is_empty() {
@@ -343,22 +456,8 @@ impl Evidence {
                 }
                 if let Ok(files) = fs::read_to_string(dir.join("files")) {
                     for f in files.lines() {
-                        let name = if let Some(b) = f.strip_prefix("usr/bin/") {
-                            b
-                        } else if let Some(d) = f
-                            .strip_prefix("usr/share/applications/")
-                            .and_then(|d| d.strip_suffix(".desktop"))
-                        {
-                            d
-                        } else if let Some(o) = f.strip_prefix("opt/") {
-                            o.split('/').next().unwrap_or("")
-                        } else if let Some(x) = f.strip_prefix("etc/xdg/") {
-                            x.split('/').next().unwrap_or("")
-                        } else {
-                            continue;
-                        };
-                        if !name.is_empty() && !name.contains('/') {
-                            ev.add_installed(name);
+                        for name in path_identities(f) {
+                            ev.add_installed(&name);
                         }
                     }
                 }
@@ -366,6 +465,9 @@ impl Evidence {
         }
         if let Ok(log) = fs::read("/var/log/pacman.log") {
             ev.add_pacman_log(&String::from_utf8_lossy(&log), &pkgs);
+        }
+        if files_db_enabled() {
+            ev.add_files_db_aliases();
         }
         if let Some(path) = std::env::var_os("PATH") {
             for d in std::env::split_paths(&path) {
@@ -430,6 +532,35 @@ impl Evidence {
         }
         ev
     }
+}
+
+/// Identity names a packaged file path gives: `usr/bin/<x>`,
+/// `usr/share/applications/<x>.desktop`, `opt/<x>/…`, `etc/xdg/<x>`.
+fn path_identities(f: &str) -> Vec<String> {
+    let name = if let Some(b) = f.strip_prefix("usr/bin/") {
+        b
+    } else if let Some(d) = f
+        .strip_prefix("usr/share/applications/")
+        .and_then(|d| d.strip_suffix(".desktop"))
+    {
+        d
+    } else if let Some(o) = f.strip_prefix("opt/") {
+        o.split('/').next().unwrap_or("")
+    } else if let Some(x) = f.strip_prefix("etc/xdg/") {
+        x.split('/').next().unwrap_or("")
+    } else {
+        ""
+    };
+    if name.is_empty() || name.contains('/') {
+        Vec::new()
+    } else {
+        vec![name.to_string()]
+    }
+}
+
+/// Owner asked for a way back: `--no-files-db` / XCLEANER_NO_FILES_DB=1.
+pub fn files_db_enabled() -> bool {
+    std::env::var_os("XCLEANER_NO_FILES_DB").is_none()
 }
 
 fn add_desktop_fields(ev: &mut Evidence, text: &str) {
@@ -550,22 +681,37 @@ fn birth_time(p: &Path) -> Option<i64> {
     Some(t.duration_since(UNIX_EPOCH).ok()?.as_secs() as i64)
 }
 
-fn personal_markers(p: &Path) -> Vec<&'static str> {
-    let mut found = Vec::new();
-    let check = |dir: &Path, found: &mut Vec<&'static str>| {
-        for m in PERSONAL_MARKERS {
-            if dir.join(m).exists() && !found.contains(m) {
-                found.push(*m);
+/// Personal-data markers within the first 3 levels (bounded walk).
+fn personal_markers(p: &Path) -> Vec<String> {
+    let mut found: Vec<String> = Vec::new();
+    let mut level = vec![p.to_path_buf()];
+    for _ in 0..3 {
+        let mut next = Vec::new();
+        for dir in &level {
+            let Ok(rd) = fs::read_dir(dir) else { continue };
+            for e in rd.flatten().take(256) {
+                let name = e.file_name().to_string_lossy().to_string();
+                let is_dir = e.file_type().map(|t| t.is_dir()).unwrap_or(false);
+                if PERSONAL_MARKERS.contains(&name.as_str()) {
+                    if !found.contains(&name) {
+                        found.push(name.clone());
+                    }
+                } else if !is_dir {
+                    if let Some(ext) = name.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()) {
+                        if PERSONAL_EXT.contains(&ext.as_str()) {
+                            let m = format!("pliki .{ext}");
+                            if !found.contains(&m) {
+                                found.push(m);
+                            }
+                        }
+                    }
+                }
+                if is_dir && next.len() < 512 {
+                    next.push(e.path());
+                }
             }
         }
-    };
-    check(p, &mut found);
-    if let Ok(rd) = fs::read_dir(p) {
-        for e in rd.flatten().take(64) {
-            if e.file_type().map(|t| t.is_dir()).unwrap_or(false) {
-                check(&e.path(), &mut found);
-            }
-        }
+        level = next;
     }
     found
 }
@@ -693,12 +839,18 @@ fn leftover_item(
         name: format!("{name} ({root})"),
         description,
         category: Category::Leftovers,
-        risk: Risk::Review,
+        risk: if markers.is_empty() {
+            Risk::Low
+        } else {
+            Risk::Review
+        },
         regen: Regen::Never,
         targets: vec![(rel.to_path_buf(), action)],
         guards: vec![name.to_lowercase()],
         singleton_lock: None,
         media_check: false,
+        // Owner 2026-11-22: preselect leftovers when nothing personal is inside.
+        preselect: markers.is_empty(),
     }
 }
 
@@ -768,6 +920,33 @@ mod tests {
         assert!(judge("psd", None, &ev).is_some());
         // Unknown names are never offered.
         assert!(judge("music-opus", None, &ev).is_none());
+    }
+
+    #[test]
+    fn files_listing_adds_renamed_binaries() {
+        let mut ev = ev();
+        assert!(judge("psd-suspend-sync", None, &ev).is_none());
+        ev.add_files_listing("profile-sync-daemon usr/bin/psd-suspend-sync\nprofile-sync-daemon usr/share/doc/x\nzed usr/bin/zeditor\n");
+        assert!(judge("psd-suspend-sync", None, &ev).is_some());
+        // zed is installed again: its files are not removed aliases.
+        assert!(judge("zeditor", None, &ev).is_none());
+    }
+
+    #[test]
+    fn personal_markers_find_games_and_screenshots() {
+        let d = std::env::temp_dir().join(format!("xc-markers-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&d);
+        fs::create_dir_all(d.join("BSInstances/game")).unwrap();
+        fs::write(d.join("BSInstances/game/Beat Saber.exe"), b"MZ").unwrap();
+        fs::create_dir_all(d.join("venv/bin")).unwrap();
+        let m = personal_markers(&d);
+        assert!(
+            m.contains(&"BSInstances".to_string()) && m.contains(&"pliki .exe".to_string()),
+            "{m:?}"
+        );
+        let clean = d.join("venv");
+        assert!(personal_markers(&clean).is_empty());
+        fs::remove_dir_all(&d).unwrap();
     }
 
     #[test]

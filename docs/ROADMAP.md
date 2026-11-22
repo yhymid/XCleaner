@@ -50,10 +50,17 @@ maszyny, a UPSTREAM-CLEANERS opisuje BleachBit, czkawka, kondo, CCleaner i inne.
 - [x] Lista wspólnych nazw (gtk, dconf, pulse, systemd…) zawsze wygrywa. Kopie psd `*-back-ovfs.base`.
 - [x] Na tej maszynie: 20 pozycji, ok. 9,8 GB. Zgodne z ręczną analizą, a fałszywy
   alarm „Discord Key Storage” jest odrzucany.
+- [x] Aliasy z `pacman -Fl <usunięte>` (binarki, .desktop, /opt, /etc/xdg), z cache
+  w `~/.cache/xcleaner` (pierwszy skan 3,9 s, kolejne 0,5 s). Powrót: `--no-files-db`.
+  - Na tej maszynie dało 0 nowych trafień, ale łapie przemianowania na innych systemach.
+- [x] Decyzja właściciela: resztki bez danych osobistych są zaznaczone z góry („niskie ryzyko”).
+  - Znaczniki danych: profile przeglądarek, zapisy, zrzuty ekranu, instancje gier,
+    pliki .exe/.sav, historia rozmów AI.
+  - Na tej maszynie odznaczone: BSManager (gra i mapy), shadPS4, zed, profile przeglądarek.
+- [x] Twarde linki: rozmiar współdzielony jest raportowany (realnie zwolni się mniej).
 - [ ] Później:
   - dopasowania po pierwszym członie nazwy (evolution-data-server → evolution);
-  - aliasy z `pacman -Fl`, rekordy XUninstaller, dotdiry `~/.<nazwa>`;
-  - decyzja właściciela o zaznaczaniu pozycji „pewnych” bez danych osobistych.
+  - rekordy XUninstaller, dotdiry `~/.<nazwa>`.
 
 ## v0.0.4 — średnie
 - [ ] Okno szczegółów pozycji: lista ścieżek z rozmiarami, otwórz w menedżerze plików.

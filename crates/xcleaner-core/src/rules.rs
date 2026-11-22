@@ -376,11 +376,14 @@ pub struct Item {
     pub singleton_lock: Option<PathBuf>,
     /// Re-rate as Review when the measured content is mostly audio/video.
     pub media_check: bool,
+    /// Selected by default even though the risk is not Safe (owner decision
+    /// for leftovers without personal data).
+    pub preselect: bool,
 }
 
 impl Item {
     pub fn default_selected(&self) -> bool {
-        self.risk == Risk::Safe
+        self.risk == Risk::Safe || self.preselect
     }
 }
 

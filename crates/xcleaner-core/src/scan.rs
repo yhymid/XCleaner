@@ -103,6 +103,7 @@ fn static_items(layout: &Layout) -> Vec<Item> {
                 guards: r.guards.iter().map(|s| s.to_string()).collect(),
                 singleton_lock: None,
                 media_check: false,
+                preselect: false,
             })
         })
         .collect()
@@ -173,6 +174,7 @@ fn chromium_items(layout: &Layout) -> Vec<Item> {
             guards,
             singleton_lock: Some(rel.join("SingletonLock")),
             media_check: false,
+            preselect: false,
         });
     }
     items
@@ -232,6 +234,7 @@ fn cachedir_tag_items(layout: &Layout, covered: &[PathBuf]) -> Vec<Item> {
             guards: Vec::new(),
             singleton_lock: None,
             media_check: true,
+            preselect: false,
         });
     }
     items
@@ -368,6 +371,15 @@ pub fn scan(layout: &Layout) -> std::io::Result<ScanResult> {
     found.retain(|f| f.usage.files > 0 || !f.errors.is_empty());
     for f in &mut found {
         f.blocked = blocked_reason(&f.item, &procs, &layout.home);
+        if f.item.preselect && f.usage.shared_bytes * 2 > f.usage.bytes {
+            f.item.preselect = false;
+        }
+        if f.usage.shared_bytes * 10 > f.usage.bytes {
+            f.item.description.push_str(&format!(
+                "\nTwarde linki: {} jest współdzielone z innymi miejscami — realnie zwolni się mniej.",
+                crate::format_size(f.usage.shared_bytes)
+            ));
+        }
         if f.item.media_check && f.usage.mostly_media() {
             f.item.risk = Risk::Review;
             f.item.regen = Regen::Never;

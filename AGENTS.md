@@ -11,8 +11,12 @@ Read README, docs/ROADMAP.md and docs/research/ first.
   `~/.cache/music-opus` = 8.5 GB music) and known stateful ones (`CACHE_STATEFUL`).
 - Owner 2026-11-22: leftovers of uninstalled apps in `~/.config` / `~/.local` must be found
   (uninstallers always leave remnants) — design in docs/research/LEFTOVERS-DETECTION-2026-11.md.
-- Only `Risk::Safe` items are preselected. Trash, history, personal data, prefixes and
-  leftover profiles are never preselected.
+- Only `Risk::Safe` items are preselected, plus (owner 2026-11-22) leftovers with no
+  personal-data markers (`leftovers::PERSONAL_MARKERS`/`PERSONAL_EXT`). Trash, history,
+  personal data, prefixes and leftover profiles are never preselected.
+- Owner 2026-11-22: use every evidence source and measure its effect on real data before
+  deciding (e.g. `pacman -Fl` aliases), instead of guessing. New mechanisms keep a switch
+  back (`--no-files-db`).
 - Deletion is permanent (no quarantine); the confirmation dialog says so.
 - Phase 1 is HOME-only and refuses to run as root. Phase 2 (`/`) will reuse the
   XUninstaller root broker; the GUI never runs as root.
