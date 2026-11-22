@@ -128,7 +128,7 @@ sprawdzamy w VM w v0.3.0.
 
 1. [x] Bezpieczeństwo: stanowe katalogi w `~/.cache` (sesje XFCE, schowek xfce4, obexd, ibus,
    JetBrains Local History, kioexec, evolution, tracker3) — nigdy domyślnie zaznaczone.
-2. [~] Przenośny build (cechy GTK zrobione; kontener czeka na subuid/subgid dla podmana):
+2. [x] Przenośny build (glibc 2.39, sprawdzony w kontenerach Ubuntu 24.04, Debian 13, Fedora 43, openSUSE TW):
    - `gtk4 v4_10` + `adw v1_5`, `adw::Spinner` → `gtk::Spinner`;
    - AppImage budowany w kontenerze `ubuntu:24.04` (glibc 2.39 zamiast 2.44).
 3. [x] Środowisko AppImage nie przecieka do programów systemu: `GI_TYPELIB_PATH`, `XDG_DATA_DIRS`,
@@ -147,7 +147,7 @@ sprawdzamy w VM w v0.3.0.
     raporty awarii (apport/ABRT), `flatpak uninstall --unused`, wyłączone rewizje Snap,
     `rpm-ostree cleanup`, stare moduły kernela na innych dystrybucjach.
     Stare kernele tylko po podglądzie, nigdy domyślnie; bez `autoremove`.
-11. [ ] Wydanie (czeka na budowanie w kontenerze i test właściciela): AppImage + `.deb` + `.rpm` + `.pkg.tar.zst` + `SHA256SUMS`.
+11. [~] Wydanie (pliki gotowe, czeka na test właściciela): AppImage + `.deb` + `.rpm` + `.pkg.tar.zst` + `SHA256SUMS`.
 
 Uwagi do v0.3.0 (VM): dnf nie daje jeszcze pozostałości (historia w SQLite), a doas, `su`,
 apt, dnf, zypper, xbps, apk, Snap i rpm-ostree nie były uruchamiane na prawdziwych systemach.
