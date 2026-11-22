@@ -253,6 +253,7 @@ pub fn discover(layout: &Layout) -> Vec<Item> {
     let mut items = static_items(layout);
     items.extend(crate::extra::steam_items(layout));
     items.extend(crate::extra::discord_items(layout));
+    items.extend(crate::extra::flatpak_cache_items(layout));
     items.extend(chromium_items(layout));
     items.extend(crate::extra::dead_launcher_items(layout));
     let c = covered(&items);

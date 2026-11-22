@@ -204,6 +204,21 @@ pub struct Evidence {
     pub removed: HashMap<String, Removed>,
     /// Installed Flatpak app IDs (exact).
     pub flatpaks: HashSet<String>,
+    /// First name token of installed things (`evolution` of evolution-data-server).
+    pub installed_first: HashSet<String>,
+    /// First name token (≥4 chars) of removed packages.
+    pub removed_first: HashMap<String, Removed>,
+}
+
+/// `evolution-data-server` → `evolution`; `com.spikehd.dorion` → none.
+fn first_token(name: &str) -> Option<String> {
+    let n = name.trim_start_matches('.');
+    if n.matches('.').count() >= 2 {
+        return None;
+    }
+    let t = n.split(['-', '_', ' ', '.']).next()?;
+    let t = squash(t);
+    (t.len() >= 4).then_some(t)
 }
 
 fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
@@ -296,6 +311,9 @@ impl Evidence {
                 installed_at: inst,
                 removed_at: rm,
             };
+            if let Some(t) = first_token(pkg) {
+                self.removed_first.entry(t).or_insert_with(|| r.clone());
+            }
             let mut names = vec![pkg_core(pkg), squash(pkg)];
             for (p, al) in ALIASES {
                 if pkg_core(pkg) == pkg_core(p) {
@@ -421,6 +439,9 @@ impl Evidence {
                 self.installed.insert(squash(leaf));
             }
         }
+        if let Some(t) = first_token(name) {
+            self.installed_first.insert(t);
+        }
     }
 
     /// Read the real system (no root needed).
@@ -510,6 +531,9 @@ impl Evidence {
                 ev.add_installed(id);
             }
         }
+        for name in find_appimages(home) {
+            ev.add_installed(&appimage_stem(&name));
+        }
         for dir in [
             home.join(".local/share/flatpak/app"),
             PathBuf::from("/var/lib/flatpak/app"),
@@ -563,6 +587,62 @@ pub fn files_db_enabled() -> bool {
     std::env::var_os("XCLEANER_NO_FILES_DB").is_none()
 }
 
+/// AppImages in the usual places (≤3 levels): they are installed apps even
+/// though no package manager knows them.
+fn find_appimages(home: &Path) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut level: Vec<PathBuf> = [
+        "Applications",
+        "AppImages",
+        "Pobrane",
+        "Downloads",
+        "Pulpit",
+        "Desktop",
+        ".local/bin",
+        ".local/share",
+        "Apps",
+        "Games",
+    ]
+    .iter()
+    .map(|d| home.join(d))
+    .collect();
+    for _ in 0..3 {
+        let mut next = Vec::new();
+        for dir in &level {
+            let Ok(rd) = fs::read_dir(dir) else { continue };
+            for e in rd.flatten().take(2000) {
+                let name = e.file_name().to_string_lossy().to_string();
+                let ft = e.file_type();
+                if name.to_ascii_lowercase().ends_with(".appimage") {
+                    out.push(name);
+                } else if ft.map(|t| t.is_dir()).unwrap_or(false)
+                    && !name.starts_with('.')
+                    && next.len() < 2000
+                {
+                    next.push(e.path());
+                }
+            }
+        }
+        level = next;
+    }
+    out
+}
+
+/// `XUninstaller-0.1.0-x86_64.AppImage` → `XUninstaller`.
+fn appimage_stem(file: &str) -> String {
+    let base = &file[..file.len().saturating_sub(".appimage".len())];
+    base.split(['-', '_'])
+        .take_while(|t| {
+            let hexy = t.len() >= 6 && t.chars().all(|c| c.is_ascii_hexdigit());
+            !hexy
+                && !t.starts_with(|c: char| c.is_ascii_digit())
+                && !t.eq_ignore_ascii_case("x86")
+                && !(t.starts_with('v') && t[1..].starts_with(|c: char| c.is_ascii_digit()))
+        })
+        .collect::<Vec<_>>()
+        .join("-")
+}
+
 fn add_desktop_fields(ev: &mut Evidence, text: &str) {
     for l in text.lines() {
         if let Some(v) = l.strip_prefix("StartupWMClass=") {
@@ -582,6 +662,8 @@ fn add_desktop_fields(ev: &mut Evidence, text: &str) {
 pub enum Tier {
     Exact,
     Strong,
+    /// Only the first name token matches a removed package.
+    Review,
 }
 
 impl Tier {
@@ -589,6 +671,7 @@ impl Tier {
         match self {
             Tier::Exact => "pewne",
             Tier::Strong => "prawie pewne",
+            Tier::Review => "możliwe",
         }
     }
 }
@@ -636,7 +719,27 @@ pub fn judge(name: &str, birth: Option<i64>, ev: &Evidence) -> Option<Verdict> {
     if names.iter().any(|n| ev.installed.contains(n)) {
         return None;
     }
-    let r = names.iter().find_map(|n| ev.removed.get(n))?;
+    let Some(r) = names.iter().find_map(|n| ev.removed.get(n)) else {
+        // Weak: `evolution` after `evolution-data-server` was removed, with no
+        // installed package sharing that first token.
+        let t = names.first().filter(|t| t.len() >= 4)?;
+        if ev.installed_first.contains(t) || ev.installed.iter().any(|i| i.starts_with(t.as_str()))
+        {
+            return None;
+        }
+        let r = ev.removed_first.get(t)?;
+        if birth.is_some_and(|b| b > r.removed_at + 60) {
+            return None;
+        }
+        return Some(Verdict {
+            tier: Tier::Review,
+            why: format!(
+                "nazwa pasuje do początku usuniętego pakietu {} ({})",
+                r.package,
+                format_date(r.removed_at)
+            ),
+        });
+    };
     if let Some(b) = birth {
         // Created after the removal: another program made it.
         if b > r.removed_at + 60 {
@@ -839,7 +942,7 @@ fn leftover_item(
         name: format!("{name} ({root})"),
         description,
         category: Category::Leftovers,
-        risk: if markers.is_empty() {
+        risk: if markers.is_empty() && tier != Tier::Review {
             Risk::Low
         } else {
             Risk::Review
@@ -850,7 +953,7 @@ fn leftover_item(
         singleton_lock: None,
         media_check: false,
         // Owner 2026-11-22: preselect leftovers when nothing personal is inside.
-        preselect: markers.is_empty(),
+        preselect: markers.is_empty() && tier != Tier::Review,
     }
 }
 
@@ -868,6 +971,8 @@ mod tests {
 [2026-10-03T10:00:00+0200] [ALPM] installed zed (1-1)
 [2026-10-04T10:00:00+0200] [ALPM] removed zed (1-1)
 [2026-10-05T10:00:00+0200] [ALPM] installed zed (1-1)
+[2026-10-05T10:00:00+0200] [ALPM] installed evolution-data-server (1-1)
+[2026-10-06T10:00:00+0200] [ALPM] removed evolution-data-server (1-1)
 ";
 
     fn ev() -> Evidence {
@@ -918,6 +1023,8 @@ mod tests {
         assert!(judge("zed", None, &ev).is_none());
         // Alias from a renamed binary.
         assert!(judge("psd", None, &ev).is_some());
+        // First-token match is only "możliwe".
+        assert_eq!(judge("evolution", None, &ev).unwrap().tier, Tier::Review);
         // Unknown names are never offered.
         assert!(judge("music-opus", None, &ev).is_none());
     }
@@ -947,6 +1054,26 @@ mod tests {
         let clean = d.join("venv");
         assert!(personal_markers(&clean).is_empty());
         fs::remove_dir_all(&d).unwrap();
+    }
+
+    #[test]
+    fn appimage_stems() {
+        assert_eq!(
+            appimage_stem("XUninstaller-0.1.0-x86_64.AppImage"),
+            "XUninstaller"
+        );
+        assert_eq!(
+            appimage_stem("Mornye-v5.3.0-linux-x86_64_4ad8.AppImage"),
+            "Mornye"
+        );
+        assert_eq!(
+            appimage_stem("samrewritten-gtk_c315e5.AppImage"),
+            "samrewritten-gtk"
+        );
+        assert_eq!(
+            appimage_stem("steamforge-linux-amd64.appimage"),
+            "steamforge-linux-amd64"
+        );
     }
 
     #[test]

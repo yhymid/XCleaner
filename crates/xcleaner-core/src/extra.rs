@@ -259,6 +259,37 @@ pub fn cache_rest_items(layout: &Layout, covered: &[PathBuf]) -> Vec<Item> {
     items
 }
 
+// ------------------------------------------------------- Flatpak cache
+
+/// `~/.var/app/<id>/cache` of installed Flatpak apps (orphans are leftovers).
+pub fn flatpak_cache_items(layout: &Layout) -> Vec<Item> {
+    let var_app = PathBuf::from(".var/app");
+    let mut items = Vec::new();
+    for id in sorted_names(&layout.home.join(&var_app)) {
+        if !flatpak_installed(&layout.home, &id) {
+            continue;
+        }
+        let rel = var_app.join(&id).join("cache");
+        if !is_real_dir(&layout.home.join(&rel)) {
+            continue;
+        }
+        let leaf = id.rsplit('.').next().unwrap_or(&id).to_lowercase();
+        let mut it = item(
+            format!("flatpak-cache:{id}"),
+            format!("{id} — cache Flatpak"),
+            "Pamięć podręczna aplikacji Flatpak. Ustawienia i dane (config, data) zostają.".into(),
+            Category::Apps,
+            Risk::Safe,
+            Regen::Same,
+        );
+        it.targets.push((rel, Action::ClearDir));
+        it.guards = vec![leaf];
+        it.media_check = true;
+        items.push(it);
+    }
+    items
+}
+
 // ------------------------------------------------------ dead launchers
 
 fn split_exec(exec: &str) -> Vec<String> {
