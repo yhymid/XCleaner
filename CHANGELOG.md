@@ -1,5 +1,54 @@
 # Changelog
 
+## 0.2.0 - Open Road
+
+XCleaner wychodzi poza Archa: działa na Ubuntu, Debianie, Mincie, Fedorze, openSUSE
+i pochodnych. Każdy nowy element ma źródło w kodzie lub dokumentacji danego systemu,
+a podejrzane rzeczy są tylko do przejrzenia.
+
+### Na każdej dystrybucji
+- Paczki `.deb` (Ubuntu 24.04+, Debian 13, Mint 22, Pop!_OS) i `.rpm` (Fedora 41+,
+  openSUSE Tumbleweed) obok AppImage i paczki pacmana. AppImage wymaga teraz glibc 2.39
+  zamiast 2.44, więc działa także poza Archem.
+- Pozostałości po odinstalowanych aplikacjach na Debianie i Ubuntu (`dpkg.log`, także
+  stare spakowane logi, i pakiety „rc”). Na Fedorze i openSUSE historia pakietów nie jest
+  czytelna bez roota, więc program niczego tam nie zgaduje.
+- Terminal do hasła dobierany według pulpitu (Konsole, Ptyxis, GNOME Terminal, xfce4-terminal…),
+  z poprawnymi argumentami każdego. Program wie, kiedy okno zamknięto albo hasło było złe.
+- Hasło przez `sudo`, `doas` albo `su` (Debian z hasłem roota). Nadal bez polkit.
+
+### System
+- Cache paczek przez ich własne komendy: `apt-get autoclean` (pełne `apt-get clean` tylko
+  do przejrzenia), `dnf clean packages`, `zypper clean`, `xbps-remove -O`, `apk cache clean`,
+  `eclean distfiles`.
+- Stare wpisy dziennika systemd (`journalctl --vacuum-time=4weeks`), zrotowane logi
+  w `/var/log` (nigdy aktywne, audit ani historia logowań).
+- Nieużywane runtime’y Flatpak, wyłączone rewizje Snap, `rpm-ostree cleanup`.
+- Raporty awarii apport (Ubuntu) i ABRT (Fedora).
+- Stare kernele — wyłącznie menedżerem pakietów, tylko do przejrzenia; działający zostaje.
+- Moduły po usuniętych kernelach także na Debianie i Fedorze.
+- Na systemach niezmiennych (SteamOS, Silverblue/Bazzite, NixOS, MicroOS) program nie
+  dotyka obrazu systemu.
+- Pacman: puste i porzucone katalogi `download-*` (na nich wywalał się `pacman -Sc`),
+  bazy repozytoriów usuniętych z `pacman.conf`.
+- Każde zadanie czeka, gdy działa menedżer pakietów (apt, dnf, zypper, xbps, apk, pacman).
+
+### Katalog domowy
+- Steam z pakietu deb, Flatpaka i Snapa: ochrona danych gier i shadery jak w zwykłej instalacji.
+- Cache aplikacji Snap i dane starych rewizji Snap; Flatpak i Snap są blokowane, gdy aplikacja działa.
+- Kosz: także `directorysizes`.
+
+### Bezpieczeństwo
+- Nigdy z góry: katalogi w `~/.cache`, które trzymają Twoje dane (sesje XFCE, historia schowka,
+  pliki z Bluetooth, słowniki ibus, Local History JetBrains, kopie poczty Evolution, indeks tracker3).
+- Nowe blokady: gwiazdki Nautilusa, metadane GVfs, Akonadi, ulubione KDE, dodatki Cinnamona,
+  poczta lokalna Evolution, `data` i `config` aplikacji Flatpak, profile Firefoksa w Snapie.
+- Programy uruchamiane z AppImage (terminal, menedżer plików, pacman) nie dostają jego
+  bibliotek ani zmiennych.
+
+### Poprawki
+- Historia czyszczeń: każde zadanie systemowe ma osobną linię z prawdziwym zwolnionym miejscem.
+
 ## 0.1.0 - First Sweep
 
 Pierwsze wydanie. XCleaner szuka śmieci w katalogu domowym i w systemie,
