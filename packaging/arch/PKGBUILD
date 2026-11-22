@@ -1,0 +1,44 @@
+# Maintainer: yhymid <yhymid@users.noreply.github.com>
+pkgname=xcleaner
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Fast, precise disk cleaner: caches, logs, build artifacts and leftovers of uninstalled apps (GTK4)"
+arch=('x86_64')
+url="https://github.com/yhymid/XCleaner"
+license=('MIT')
+depends=('gtk4' 'libadwaita' 'glibc' 'gcc-libs')
+makedepends=('cargo')
+optdepends=('pacman-contrib: pacman cache cleaning (paccache)'
+            'sudo: system cleaning (coredumps, pacman cache, old kernel modules)')
+source=("$pkgname-$pkgver.tar.gz::https://github.com/yhymid/XCleaner/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+prepare() {
+  cd "XCleaner-$pkgver"
+  export RUSTUP_TOOLCHAIN=stable
+  cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
+}
+
+build() {
+  cd "XCleaner-$pkgver"
+  export RUSTUP_TOOLCHAIN=stable
+  export CARGO_TARGET_DIR=target
+  cargo build --frozen --release -p xcleaner
+}
+
+check() {
+  cd "XCleaner-$pkgver"
+  export RUSTUP_TOOLCHAIN=stable
+  export CARGO_TARGET_DIR=target
+  XCLEANER_NO_ROOT=1 XCLEANER_NO_HISTORY=1 cargo test --frozen --release -p xcleaner-core
+}
+
+package() {
+  cd "XCleaner-$pkgver"
+  install -Dm755 target/release/xcleaner "$pkgdir/usr/bin/xcleaner"
+  install -Dm644 packaging/io.github.yhymid.XCleaner.desktop \
+    "$pkgdir/usr/share/applications/io.github.yhymid.XCleaner.desktop"
+  install -Dm644 packaging/io.github.yhymid.XCleaner.svg \
+    "$pkgdir/usr/share/icons/hicolor/scalable/apps/io.github.yhymid.XCleaner.svg"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}
