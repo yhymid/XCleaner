@@ -21,6 +21,8 @@ cargo build --release
 ```
 Requires GTK ≥ 4.12 and libadwaita ≥ 1.6.
 
+AppImage: `./packaging/build-appimage.sh` → `dist/XCleaner-<version>-x86_64.AppImage`.
+
 ## Layout
 - `crates/xcleaner-core` – rules, parallel scanner, descriptor-based safe deletion (no GTK).
 - `crates/xcleaner` – GTK4/libadwaita GUI and CLI report.

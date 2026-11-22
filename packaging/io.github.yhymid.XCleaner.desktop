@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=XCleaner
+GenericName=Disk cleaner
+GenericName[pl]=Czyszczenie dysku
+Comment=Find and remove caches, logs and leftovers of uninstalled apps
+Comment[pl]=Znajdź i usuń pamięć podręczną, logi i resztki po odinstalowanych aplikacjach
+Exec=xcleaner
+Icon=io.github.yhymid.XCleaner
+Terminal=false
+Categories=System;Utility;
+Keywords=clean;cache;disk;space;junk;leftovers;
+StartupNotify=true

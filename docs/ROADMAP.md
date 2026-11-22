@@ -87,8 +87,11 @@ maszyny, a UPSTREAM-CLEANERS opisuje BleachBit, czkawka, kondo, CCleaner i inne.
   zrobić razem z regułami użytkownika.
 
 ## v0.1.0 — wydanie
-- [ ] AppImage (linuxdeploy + plugin GTK, jak w XUninstaller).
-- [ ] Ikona, plik .desktop, README PL/EN, testy na świeżym Arch/CachyOS.
+- [x] AppImage: `packaging/build-appimage.sh`.
+  - linuxdeploy z przypiętym SHA-256 i plugin GTK z przypiętym commitem, jak w XU.
+  - 48 MB; przetestowany na Decku (CLI i okno, Wayland).
+- [x] Ikona SVG i plik .desktop (PL/EN).
+- [ ] README PL/EN dla użytkownika, testy na świeżym Arch/CachyOS, wydanie (decyzja właściciela).
 
 ## Faza 2 — system (`/`, przez sudo)
 - [ ] Broker roota z XUninstaller: GUI nigdy nie działa jako root; dozwolona jest tylko
