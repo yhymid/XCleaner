@@ -393,6 +393,24 @@ fn root_found() -> Vec<Found> {
                     format!("/var/lib/pacman/sync: {} — to samo co część `pacman -Sc`.", p.detail),
                     Regen::Never,
                 ),
+                RootTask::JournalVacuum => (
+                    "root:journal-vacuum",
+                    "Stare wpisy dziennika systemd",
+                    format!("journalctl --vacuum-time=4weeks: {} (/var/log/journal). Bieżący dziennik i ostatnie 4 tygodnie zostają.", p.detail),
+                    Regen::Never,
+                ),
+                RootTask::RotatedLogs => (
+                    "root:rotated-logs",
+                    "Stare, zrotowane logi w /var/log",
+                    format!("{}. Tylko poprzednie wersje logów (*.1, *.gz z numerem, *-RRRRMMDD, *.old); aktywne logi, audit i historia logowań zostają.", p.detail),
+                    Regen::Never,
+                ),
+                RootTask::FlatpakUnused => (
+                    "root:flatpak-unused",
+                    "Nieużywane runtime’y Flatpak",
+                    format!("flatpak uninstall --unused: {}. Żadna zainstalowana aplikacja ich nie używa; rozmiar przybliżony.", p.detail),
+                    Regen::Never,
+                ),
                 RootTask::KernelModules => (
                     "root:kernel-modules",
                     "Moduły po usuniętych kernelach",

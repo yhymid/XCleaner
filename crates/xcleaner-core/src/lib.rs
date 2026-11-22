@@ -13,6 +13,7 @@ pub mod protect;
 pub mod root;
 pub mod rules;
 pub mod scan;
+pub mod sysclean;
 pub mod term;
 pub mod usage;
 

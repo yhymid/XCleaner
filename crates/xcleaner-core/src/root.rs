@@ -43,16 +43,25 @@ pub enum RootTask {
     PacmanDownloads,
     /// Sync databases of repositories no longer in pacman.conf (`pacman -Sc`).
     UnusedSyncDbs,
+    /// `journalctl --vacuum-time=4weeks` (archived journal files only).
+    JournalVacuum,
+    /// Rotated logs in /var/log (`*.N`, `*.N.gz`, `*-YYYYMMDD`, `*.old`).
+    RotatedLogs,
+    /// `flatpak uninstall --unused --system`.
+    FlatpakUnused,
 }
 
 impl RootTask {
-    pub const ALL: [RootTask; 6] = [
+    pub const ALL: [RootTask; 9] = [
         RootTask::Coredumps,
         RootTask::PacmanCache,
         RootTask::PacmanCacheAll,
         RootTask::KernelModules,
         RootTask::PacmanDownloads,
         RootTask::UnusedSyncDbs,
+        RootTask::JournalVacuum,
+        RootTask::RotatedLogs,
+        RootTask::FlatpakUnused,
     ];
 
     /// Where the task works (for display).
@@ -62,6 +71,9 @@ impl RootTask {
             RootTask::PacmanCache | RootTask::PacmanCacheAll | RootTask::PacmanDownloads => PKG_DIR,
             RootTask::KernelModules => MODULES_DIR,
             RootTask::UnusedSyncDbs => SYNC_DIR,
+            RootTask::JournalVacuum => "/var/log/journal",
+            RootTask::RotatedLogs => "/var/log",
+            RootTask::FlatpakUnused => "/var/lib/flatpak",
         }
     }
 
@@ -73,6 +85,9 @@ impl RootTask {
             RootTask::KernelModules => "kernel-modules",
             RootTask::PacmanDownloads => "pacman-downloads",
             RootTask::UnusedSyncDbs => "unused-sync-dbs",
+            RootTask::JournalVacuum => "journal-vacuum",
+            RootTask::RotatedLogs => "rotated-logs",
+            RootTask::FlatpakUnused => "flatpak-unused",
         }
     }
 
@@ -533,6 +548,15 @@ fn root_unused_sync_dbs() -> (u64, Vec<String>) {
     (freed, errs)
 }
 
+fn probe_with(task: RootTask, f: fn() -> Option<(u64, u64, String)>) -> Option<Probe> {
+    f().map(|(bytes, files, detail)| Probe {
+        task,
+        bytes,
+        files,
+        detail,
+    })
+}
+
 /// Read-only look at everything phase 2 could clean.
 pub fn probe_all() -> Vec<Probe> {
     [
@@ -542,6 +566,12 @@ pub fn probe_all() -> Vec<Probe> {
         probe_modules(),
         probe_pacman_downloads(),
         probe_unused_sync_dbs(),
+        probe_with(RootTask::JournalVacuum, crate::sysclean::probe_journal),
+        probe_with(RootTask::RotatedLogs, crate::sysclean::probe_rotated_logs),
+        probe_with(
+            RootTask::FlatpakUnused,
+            crate::sysclean::probe_flatpak_unused,
+        ),
     ]
     .into_iter()
     .flatten()
@@ -583,7 +613,7 @@ fn open_report(path: &Path, uid: u32) -> io::Result<fs::File> {
     Ok(f)
 }
 
-fn say(msg: &str) {
+pub(crate) fn say(msg: &str) {
     println!("{msg}");
     let _ = io::stdout().flush();
 }
@@ -671,6 +701,9 @@ pub fn run_root(args: &[String]) -> i32 {
             RootTask::KernelModules => root_modules(),
             RootTask::PacmanDownloads => root_pacman_downloads(),
             RootTask::UnusedSyncDbs => root_unused_sync_dbs(),
+            RootTask::JournalVacuum => crate::sysclean::root_journal(),
+            RootTask::RotatedLogs => crate::sysclean::root_rotated_logs(),
+            RootTask::FlatpakUnused => crate::sysclean::root_flatpak_unused(),
         };
         report.line("freed", t, &freed.to_string());
         for e in &errs {
