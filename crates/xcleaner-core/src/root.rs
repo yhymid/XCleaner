@@ -101,6 +101,20 @@ impl RootTask {
         }
     }
 
+    /// Works on the package cache or /usr: never on an immutable root.
+    pub fn touches_system_image(self) -> bool {
+        matches!(
+            self,
+            RootTask::PacmanCache
+                | RootTask::PacmanCacheAll
+                | RootTask::PacmanDownloads
+                | RootTask::UnusedSyncDbs
+                | RootTask::KernelModules
+                | RootTask::PkgCache
+                | RootTask::AptClean
+        )
+    }
+
     pub fn from_arg(s: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|t| t.arg() == s)
     }
@@ -302,31 +316,108 @@ fn running_release() -> String {
 /// Version dirs under /usr/lib/modules that some installed package owns,
 /// read straight from the local pacman DB (one `pacman -Qqo` per dir took
 /// ~250 ms each). `None` when the DB cannot be read: then nothing is stale.
-fn owned_module_versions() -> Option<std::collections::HashSet<String>> {
+/// Which package database decides who owns a module dir.
+enum ModuleOwners {
+    /// pacman (`/var/lib/pacman/local/*/files`) or dpkg (`info/*.list`):
+    /// the set of owned versions, read from files.
+    Set(std::collections::HashSet<String>),
+    /// rpm: asked per directory (`rpm -qf`, rpmdb is world-readable).
+    Rpm,
+}
+
+/// `usr/lib/modules/<v>/…` (pacman) or `/lib/modules/<v>/…`,
+/// `/usr/lib/modules/<v>/…` (dpkg: usrmerge aliases are not unified).
+fn module_version_of(line: &str) -> Option<&str> {
+    let l = line.trim_start_matches('/');
+    let rest = l
+        .strip_prefix("usr/lib/modules/")
+        .or_else(|| l.strip_prefix("lib/modules/"))?;
+    rest.split('/').next().filter(|v| !v.is_empty())
+}
+
+fn owned_from_files(
+    dir: &str,
+    file_of: impl Fn(&fs::DirEntry) -> Option<PathBuf>,
+) -> Option<std::collections::HashSet<String>> {
+    let rd = fs::read_dir(dir).ok()?;
     let mut owned = std::collections::HashSet::new();
-    let rd = fs::read_dir("/var/lib/pacman/local").ok()?;
     let mut seen_any = false;
     for e in rd.flatten() {
-        let Ok(files) = fs::read_to_string(e.path().join("files")) else {
+        let Some(f) = file_of(&e) else { continue };
+        let Ok(text) = fs::read_to_string(f) else {
             continue;
         };
         seen_any = true;
-        for l in files.lines() {
-            if let Some(rest) = l.strip_prefix("usr/lib/modules/") {
-                if let Some(v) = rest.split('/').next().filter(|v| !v.is_empty()) {
-                    owned.insert(v.to_string());
-                }
+        for l in text.lines() {
+            if let Some(v) = module_version_of(l) {
+                owned.insert(v.to_string());
             }
         }
     }
     seen_any.then_some(owned)
 }
 
+fn module_owners() -> Option<ModuleOwners> {
+    if let Some(s) = owned_from_files("/var/lib/pacman/local", |e| Some(e.path().join("files"))) {
+        return Some(ModuleOwners::Set(s));
+    }
+    if let Some(s) = owned_from_files("/var/lib/dpkg/info", |e| {
+        e.file_name()
+            .to_string_lossy()
+            .ends_with(".list")
+            .then(|| e.path())
+    }) {
+        return Some(ModuleOwners::Set(s));
+    }
+    Path::new("/usr/bin/rpm")
+        .exists()
+        .then_some(ModuleOwners::Rpm)
+}
+
+/// `rpm -qf` exits 0 when some package owns the path. Unknown = owned.
+fn rpm_owns(path: &Path) -> bool {
+    crate::host_command("/usr/bin/rpm")
+        .arg("-qf")
+        .arg(path)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(true)
+}
+
+/// A read-only or image-based root where the package manager does not own
+/// the system files (SteamOS A/B, ostree, NixOS, transactional-update):
+/// no task may touch /usr or the package cache there.
+pub fn immutable_root() -> Option<&'static str> {
+    if Path::new("/run/ostree-booted").exists() {
+        return Some("ostree");
+    }
+    if Path::new("/etc/NIXOS").exists() {
+        return Some("NixOS");
+    }
+    if Path::new("/usr/sbin/transactional-update").exists() {
+        return Some("transactional-update");
+    }
+    let os = fs::read_to_string("/etc/os-release").unwrap_or_default();
+    if os
+        .lines()
+        .any(|l| l.trim() == "ID=steamos" || l.trim() == "ID=\"steamos\"")
+    {
+        return Some("SteamOS");
+    }
+    None
+}
+
 /// Module dirs of kernels that are gone: real directory, plain name, not
 /// the running kernel, owned by no package.
 pub fn stale_module_dirs() -> Vec<String> {
+    if immutable_root().is_some() {
+        return Vec::new();
+    }
     let running = running_release();
-    let Some(owned) = owned_module_versions() else {
+    let Some(owners) = module_owners() else {
         return Vec::new();
     };
     let Ok(rd) = fs::read_dir(MODULES_DIR) else {
@@ -338,7 +429,11 @@ pub fn stale_module_dirs() -> Vec<String> {
             let name = e.file_name().into_string().ok()?;
             let m = fs::symlink_metadata(e.path()).ok()?;
             let plain = !name.is_empty() && !name.starts_with('.') && !name.contains('/');
-            (plain && m.is_dir() && name != running && !owned.contains(&name)).then_some(name)
+            let owned = match &owners {
+                ModuleOwners::Set(set) => set.contains(&name),
+                ModuleOwners::Rpm => rpm_owns(&e.path()),
+            };
+            (plain && m.is_dir() && name != running && !owned).then_some(name)
         })
         .collect();
     out.sort();
@@ -569,6 +664,7 @@ fn probe_with(task: RootTask, f: fn() -> Option<(u64, u64, String)>) -> Option<P
 
 /// Read-only look at everything phase 2 could clean.
 pub fn probe_all() -> Vec<Probe> {
+    let immutable = immutable_root().is_some();
     [
         probe_coredumps(),
         probe_pacman_cache(),
@@ -585,6 +681,7 @@ pub fn probe_all() -> Vec<Probe> {
     ]
     .into_iter()
     .flatten()
+    .filter(|p| !(immutable && p.task.touches_system_image()))
     .collect()
 }
 
@@ -703,8 +800,16 @@ pub fn run_root(args: &[String]) -> i32 {
     };
     say("XCleaner — czyszczenie systemu (root)\n");
     let mut errors = 0;
+    let immutable = immutable_root();
     for t in tasks {
         let (freed, errs) = match t {
+            t if immutable.is_some() && t.touches_system_image() => (
+                0,
+                vec![format!(
+                    "system {} jest niezmienny — pominięto",
+                    immutable.unwrap_or_default()
+                )],
+            ),
             RootTask::Coredumps => root_coredumps(),
             RootTask::PacmanCache => root_paccache(&[&["-r", "-k2"], &["-r", "-u", "-k0"]]),
             RootTask::PacmanCacheAll => root_paccache(&[&["-r", "-k0"]]),
@@ -1042,6 +1147,21 @@ mod tests {
             assert!(invoking_uid(Some(0)).is_err());
             assert!(invoking_uid(None).is_err());
         }
+    }
+
+    #[test]
+    fn module_paths_of_every_package_db() {
+        assert_eq!(
+            module_version_of("usr/lib/modules/6.18.6-2/kernel/x.ko"),
+            Some("6.18.6-2")
+        );
+        assert_eq!(
+            module_version_of("/lib/modules/6.1.0-27-amd64/modules.dep"),
+            Some("6.1.0-27-amd64")
+        );
+        assert_eq!(module_version_of("/usr/lib/modules/6.12.0"), Some("6.12.0"));
+        assert_eq!(module_version_of("/usr/lib/modules/"), None);
+        assert_eq!(module_version_of("/usr/lib/firmware/x"), None);
     }
 
     #[test]
