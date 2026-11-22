@@ -147,7 +147,7 @@ sprawdzamy w VM w v0.3.0.
     raporty awarii (apport/ABRT), `flatpak uninstall --unused`, wyłączone rewizje Snap,
     `rpm-ostree cleanup`, stare moduły kernela na innych dystrybucjach.
     Stare kernele tylko po podglądzie, nigdy domyślnie; bez `autoremove`.
-11. [~] Wydanie (pliki gotowe, czeka na test właściciela): AppImage + `.deb` + `.rpm` + `.pkg.tar.zst` + `SHA256SUMS`.
+11. [x] Wydanie 2026-11-22 (0.2.0 - Open Road Update): AppImage + `.deb` + `.rpm` + `.pkg.tar.zst` + `SHA256SUMS`.
 
 Uwagi do v0.3.0 (VM): dnf nie daje jeszcze pozostałości (historia w SQLite), a doas, `su`,
 apt, dnf, zypper, xbps, apk, Snap i rpm-ostree nie były uruchamiane na prawdziwych systemach.
