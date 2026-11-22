@@ -198,6 +198,8 @@ mod tests {
             ".var/app/org.gimp.GIMP/cache",
             ".var/app/org.gimp.GIMP",
             "snap/firefox/common/.cache/mozilla",
+            "snap/firefox/common/.cache",
+            "snap/firefox/7",
             ".local/share/nautilusx",
         ] {
             assert_eq!(refusal(Path::new(p)), None, "{p}");

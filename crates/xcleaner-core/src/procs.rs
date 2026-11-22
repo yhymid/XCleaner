@@ -11,7 +11,28 @@ pub struct Processes {
 
 impl Processes {
     pub fn snapshot() -> Self {
-        Self::from_proc(Path::new("/proc"))
+        let mut p = Self::from_proc(Path::new("/proc"));
+        let uid = unsafe { libc::geteuid() };
+        p.add_flatpak_instances(
+            &Path::new("/run/user")
+                .join(uid.to_string())
+                .join(".flatpak"),
+        );
+        p
+    }
+
+    /// `flatpak:<app id>` for every running Flatpak instance: each one has
+    /// `<instance>/info` with `[Application] name=<id>` (what `flatpak ps` reads).
+    fn add_flatpak_instances(&mut self, dir: &Path) {
+        let Ok(rd) = fs::read_dir(dir) else { return };
+        for e in rd.flatten() {
+            let Ok(info) = fs::read_to_string(e.path().join("info")) else {
+                continue;
+            };
+            if let Some(id) = flatpak_app_name(&info) {
+                self.names.insert(format!("flatpak:{}", id.to_lowercase()));
+            }
+        }
     }
 
     pub fn from_proc(proc_root: &Path) -> Self {
@@ -37,6 +58,12 @@ impl Processes {
                             .trim_end_matches(" (deleted)")
                             .to_lowercase(),
                     );
+                }
+            }
+            // Snap apps run in a `snap.<name>.<app>` cgroup scope.
+            if let Ok(cg) = fs::read_to_string(dir.join("cgroup")) {
+                if let Some(name) = snap_name_from_cgroup(&cg) {
+                    names.insert(format!("snap:{}", name.to_lowercase()));
                 }
             }
             if let Ok(cmd) = fs::read(dir.join("cmdline")) {
@@ -68,14 +95,63 @@ impl Processes {
         })
     }
 
+    #[cfg(test)]
+    pub fn add_name(&mut self, n: &str) {
+        self.names.insert(n.to_lowercase());
+    }
+
     pub fn pid_alive(pid: u32) -> bool {
         Path::new("/proc").join(pid.to_string()).exists()
     }
 }
 
+/// `name=` of the `[Application]` group of a Flatpak instance info file.
+fn flatpak_app_name(info: &str) -> Option<&str> {
+    let mut in_app = false;
+    for l in info.lines() {
+        let l = l.trim();
+        if l.starts_with('[') {
+            in_app = l == "[Application]";
+        } else if in_app {
+            if let Some(v) = l.strip_prefix("name=") {
+                return Some(v.trim()).filter(|v| !v.is_empty());
+            }
+        }
+    }
+    None
+}
+
+/// `firefox` from a cgroup line like
+/// `0::/user.slice/.../snap.firefox.firefox-1234.scope`.
+fn snap_name_from_cgroup(cg: &str) -> Option<&str> {
+    cg.lines()
+        .flat_map(|l| l.rsplit('/').next())
+        .find_map(|leaf| leaf.strip_prefix("snap."))
+        .and_then(|r| r.split('.').next())
+        .filter(|n| !n.is_empty())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn flatpak_and_snap_names() {
+        let info = "[Application]\nname=org.mozilla.firefox\nruntime=runtime/x\n\n[Instance]\ninstance-id=1\n";
+        assert_eq!(flatpak_app_name(info), Some("org.mozilla.firefox"));
+        assert_eq!(
+            flatpak_app_name("[Runtime]\nname=org.gnome.Platform\n"),
+            None
+        );
+        assert_eq!(
+            snap_name_from_cgroup("0::/user.slice/user-1000.slice/user@1000.service/app.slice/snap.firefox.firefox-1a2b.scope\n"),
+            Some("firefox")
+        );
+        assert_eq!(
+            snap_name_from_cgroup("0::/user.slice/session-2.scope\n"),
+            None
+        );
+    }
 
     #[test]
     fn matches_truncated_comm() {

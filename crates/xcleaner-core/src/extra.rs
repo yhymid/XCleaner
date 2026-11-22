@@ -349,7 +349,13 @@ pub fn cache_rest_items(layout: &Layout, covered: &[PathBuf]) -> Vec<Item> {
 
 // ------------------------------------------------------- Flatpak cache
 
+/// The app itself, or something in its cache directory, keeps state there.
+fn cache_dir_is_stateful(app: &str, cache_abs: &Path) -> bool {
+    is_stateful_cache(app) || sorted_names(cache_abs).iter().any(|n| is_stateful_cache(n))
+}
+
 /// `~/.var/app/<id>/cache` of installed Flatpak apps (orphans are leftovers).
+/// Inside the sandbox it is `/var/cache` (and `cache/tmp` is `/var/tmp`).
 pub fn flatpak_cache_items(layout: &Layout) -> Vec<Item> {
     let var_app = PathBuf::from(".var/app");
     let mut items = Vec::new();
@@ -358,22 +364,112 @@ pub fn flatpak_cache_items(layout: &Layout) -> Vec<Item> {
             continue;
         }
         let rel = var_app.join(&id).join("cache");
-        if !is_real_dir(&layout.home.join(&rel)) {
+        let abs = layout.home.join(&rel);
+        if !is_real_dir(&abs) {
             continue;
         }
         let leaf = id.rsplit('.').next().unwrap_or(&id).to_lowercase();
+        let stateful = cache_dir_is_stateful(&leaf, &abs);
         let mut it = item(
             format!("flatpak-cache:{id}"),
             format!("{id} — cache Flatpak"),
-            "Pamięć podręczna aplikacji Flatpak. Ustawienia i dane (config, data) zostają.".into(),
+            if stateful {
+                "Cache aplikacji Flatpak, ale ta aplikacja trzyma tam także swój stan — sprawdź przed usunięciem."
+                    .into()
+            } else {
+                "Pamięć podręczna aplikacji Flatpak. Ustawienia i dane (config, data) zostają."
+                    .into()
+            },
             Category::Apps,
-            Risk::Safe,
+            if stateful { Risk::Review } else { Risk::Safe },
             Regen::Same,
         );
         it.targets.push((rel, Action::ClearDir));
-        it.guards = vec![leaf];
+        // A running instance (cache/tmp is its /var/tmp) blocks the clean.
+        it.guards = vec![format!("flatpak:{}", id.to_lowercase()), leaf];
         it.media_check = true;
         items.push(it);
+    }
+    items
+}
+
+// ----------------------------------------------------------------- Snap
+
+/// Revision directory names: `123`, or `x1` for sideloaded snaps.
+fn is_snap_revision(name: &str) -> bool {
+    let digits = name.strip_prefix('x').unwrap_or(name);
+    !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit())
+}
+
+/// `~/snap/<name>` of installed snaps: the app cache in `common/.cache`
+/// (snap desktop helpers set XDG_CACHE_HOME there) and data of revisions
+/// that are no longer installed (snapd removes the data of revisions it
+/// removes, so these are left behind by failed or manual operations).
+pub fn snap_items(layout: &Layout) -> Vec<Item> {
+    snap_items_in(layout, Path::new("/snap"))
+}
+
+fn snap_items_in(layout: &Layout, snap_root: &Path) -> Vec<Item> {
+    let base = PathBuf::from("snap");
+    let mut items = Vec::new();
+    for name in sorted_names(&layout.home.join(&base)) {
+        let installed = snap_root.join(&name);
+        if name.starts_with('.')
+            || !is_real_dir(&layout.home.join(&base).join(&name))
+            || !installed.is_dir()
+        {
+            continue;
+        }
+        let guards = vec![format!("snap:{}", name.to_lowercase()), name.to_lowercase()];
+        let cache = base.join(&name).join("common/.cache");
+        let cache_abs = layout.home.join(&cache);
+        if is_real_dir(&cache_abs) && !sorted_names(&cache_abs).is_empty() {
+            let stateful = cache_dir_is_stateful(&name, &cache_abs);
+            let mut it = item(
+                format!("snap-cache:{name}"),
+                format!("{name} — cache Snap"),
+                if stateful {
+                    "Cache aplikacji Snap, ale ta aplikacja trzyma tam także swój stan — sprawdź przed usunięciem."
+                        .into()
+                } else {
+                    "Pamięć podręczna aplikacji Snap (~/snap/…/common/.cache). Ustawienia i dane zostają.".into()
+                },
+                Category::Apps,
+                if stateful { Risk::Review } else { Risk::Safe },
+                Regen::Same,
+            );
+            it.targets.push((cache, Action::ClearDir));
+            it.guards = guards.clone();
+            it.media_check = true;
+            items.push(it);
+        }
+        let current = fs::read_link(layout.home.join(&base).join(&name).join("current"))
+            .ok()
+            .and_then(|t| t.file_name().map(|n| n.to_string_lossy().to_string()));
+        let mut stale = item(
+            format!("snap-old-revisions:{name}"),
+            format!("{name} — dane nieistniejących rewizji Snap"),
+            "Dane rewizji, których nie ma już w /snap. snap revert ich nie użyje; aktualna rewizja i common zostają."
+                .into(),
+            Category::Leftovers,
+            Risk::Low,
+            Regen::Never,
+        );
+        for rev in sorted_names(&layout.home.join(&base).join(&name)) {
+            let rel = base.join(&name).join(&rev);
+            if !is_snap_revision(&rev)
+                || current.as_deref() == Some(rev.as_str())
+                || installed.join(&rev).exists()
+                || !is_real_dir(&layout.home.join(&rel))
+            {
+                continue;
+            }
+            stale.targets.push((rel, Action::RemoveDir));
+        }
+        if !stale.targets.is_empty() {
+            stale.guards = guards;
+            items.push(stale);
+        }
     }
     items
 }
@@ -556,6 +652,37 @@ pub fn dead_launcher_items(layout: &Layout) -> Vec<Item> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn snap_cache_and_stale_revisions() {
+        let t = std::env::temp_dir().join(format!("xc-snap-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&t);
+        let home = t.join("home");
+        let snap = t.join("snap");
+        // Installed snap with revisions 10 (current) and 11 in /snap.
+        fs::create_dir_all(snap.join("firefox/10")).unwrap();
+        fs::create_dir_all(snap.join("firefox/11")).unwrap();
+        for d in ["10", "11", "7", "common/.cache/mozilla"] {
+            fs::create_dir_all(home.join("snap/firefox").join(d)).unwrap();
+        }
+        std::os::unix::fs::symlink("10", home.join("snap/firefox/current")).unwrap();
+        // Not installed any more: handled by leftovers, not here.
+        fs::create_dir_all(home.join("snap/gone/3")).unwrap();
+        let layout = Layout::with_home(home.clone());
+        let items = snap_items_in(&layout, &snap);
+        let ids: Vec<_> = items.iter().map(|i| i.id.as_str()).collect();
+        assert_eq!(
+            ids,
+            vec!["snap-cache:firefox", "snap-old-revisions:firefox"]
+        );
+        assert_eq!(
+            items[1].targets,
+            vec![(PathBuf::from("snap/firefox/7"), Action::RemoveDir)]
+        );
+        assert!(items[0].guards.contains(&"snap:firefox".to_string()));
+        assert!(is_snap_revision("x2") && !is_snap_revision("current") && !is_snap_revision("x"));
+        fs::remove_dir_all(&t).unwrap();
+    }
 
     #[test]
     fn steam_roots_are_found_once_each() {
