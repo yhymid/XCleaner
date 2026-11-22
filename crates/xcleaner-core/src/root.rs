@@ -730,20 +730,6 @@ fn root_modules() -> (u64, Vec<String>) {
 
 // ------------------------------------------------------- GUI-side launch
 
-pub const TERMINALS: &[&str] = &[
-    "kitty",
-    "foot",
-    "alacritty",
-    "wezterm",
-    "konsole",
-    "gnome-terminal",
-    "kgx",
-    "xfce4-terminal",
-    "qterminal",
-    "terminator",
-    "xdg-terminal-exec",
-    "xterm",
-];
 const TITLE: &str = "XCleaner — hasło sudo";
 
 fn is_executable(p: &Path) -> bool {
@@ -751,46 +737,6 @@ fn is_executable(p: &Path) -> bool {
     fs::metadata(p)
         .map(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
         .unwrap_or(false)
-}
-
-pub fn find_terminal() -> Option<PathBuf> {
-    let path = std::env::var_os("PATH")?;
-    let preferred = std::env::var("TERMINAL")
-        .ok()
-        .and_then(|t| t.split_whitespace().next().map(str::to_owned));
-    preferred
-        .iter()
-        .map(String::as_str)
-        .chain(TERMINALS.iter().copied())
-        .find_map(|name| {
-            let c = Path::new(name);
-            if c.is_absolute() {
-                return is_executable(c).then(|| c.to_path_buf());
-            }
-            std::env::split_paths(&path)
-                .map(|d| d.join(name))
-                .find(|p| is_executable(p))
-        })
-}
-
-pub fn terminal_args(terminal: &Path, program: &str, args: &[OsString]) -> Vec<OsString> {
-    let name = terminal
-        .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    let mut out: Vec<OsString> = match name.as_str() {
-        "kitty" | "foot" => vec!["--title".into(), TITLE.into()],
-        "alacritty" => vec!["--title".into(), TITLE.into(), "-e".into()],
-        "wezterm" => vec!["start".into(), "--".into()],
-        "gnome-terminal" | "kgx" => vec!["--title".into(), TITLE.into(), "--".into()],
-        "xfce4-terminal" | "terminator" => vec!["-T".into(), TITLE.into(), "-x".into()],
-        "xdg-terminal-exec" => vec![],
-        "xterm" => vec!["-T".into(), TITLE.into(), "-e".into()],
-        _ => vec!["-e".into()],
-    };
-    out.push(program.into());
-    out.extend(args.iter().cloned());
-    out
 }
 
 /// The program root should run: the AppImage file when packaged (root
@@ -838,15 +784,19 @@ pub fn parse_report(text: &str) -> RootOutcome {
 }
 
 /// Run the tasks as root via `sudo` in a terminal and wait for the result.
+///
+/// The terminal runs our wrapper (see `term.rs`), which records its PID and
+/// the exit code of sudo in a status file. The end is: `done` in the report,
+/// an exit code, or the wrapper PID gone (window closed).
 pub fn launch(tasks: &[RootTask]) -> RootOutcome {
     let fail = |m: &str| RootOutcome {
         not_done: Some(m.into()),
         ..Default::default()
     };
-    let Some(terminal) = find_terminal() else {
+    let Some(terminal) = crate::term::find_terminal() else {
         return fail("nie znaleziono emulatora terminala (np. kitty, foot, konsole)");
     };
-    let Some(me) = self_path().and_then(|p| p.to_str().map(str::to_owned)) else {
+    let Some(me) = self_path() else {
         return fail("nie można ustalić ścieżki programu");
     };
     let runtime = std::env::var_os("XDG_RUNTIME_DIR")
@@ -854,54 +804,95 @@ pub fn launch(tasks: &[RootTask]) -> RootOutcome {
         .filter(|p| p.is_absolute())
         .unwrap_or_else(std::env::temp_dir);
     let report = runtime.join(format!("xcleaner-root-{}.txt", std::process::id()));
-    let _ = fs::remove_file(&report);
-    if let Err(e) = fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .open(&report)
-    {
-        return fail(&format!("plik raportu: {e}"));
+    let status = runtime.join(format!("xcleaner-root-{}.wrap", std::process::id()));
+    for f in [&report, &status] {
+        if let Err(e) = crate::term::create_private(f) {
+            return fail(&format!("plik raportu: {e}"));
+        }
     }
-    let mut sudo_args: Vec<OsString> = vec![
+    let cleanup = || {
+        let _ = fs::remove_file(&report);
+        let _ = fs::remove_file(&status);
+    };
+    let mut cmd: Vec<OsString> = vec![
+        me.clone().into(),
+        crate::term::WRAP_ARG.into(),
+        status.clone().into(),
+        "--".into(),
+        "sudo".into(),
         "env".into(),
         "APPIMAGELAUNCHER_DISABLE=1".into(),
-        me.clone().into(),
+        me.into(),
         ROOT_ARG.into(),
         "--report".into(),
         report.clone().into(),
     ];
-    sudo_args.extend(tasks.iter().map(|t| OsString::from(t.arg())));
-    let args = terminal_args(&terminal, "sudo", &sudo_args);
-    let mut cmd = crate::host_command(&terminal);
-    cmd.args(&args)
+    cmd.extend(tasks.iter().map(|t| OsString::from(t.arg())));
+    let args = crate::term::terminal_args(&terminal, TITLE, &cmd);
+    let mut child = match crate::host_command(&terminal)
+        .args(&args)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null());
-    let start = Instant::now();
-    match cmd.status() {
-        Ok(_) => {}
+        .stderr(Stdio::null())
+        .spawn()
+    {
+        Ok(c) => c,
         Err(e) => {
-            let _ = fs::remove_file(&report);
+            cleanup();
             return fail(&format!("terminal {}: {e}", terminal.display()));
         }
-    }
-    // Terminals like gnome-terminal return at once: then wait for "done".
-    if start.elapsed() < Duration::from_millis(1500) {
-        let deadline = Instant::now() + Duration::from_secs(600);
-        while Instant::now() < deadline {
-            if fs::read_to_string(&report)
-                .map(|t| t.lines().any(|l| l == "done"))
-                .unwrap_or(false)
-            {
+    };
+    let start = Instant::now();
+    let mut pid: Option<u32> = None;
+    let mut gone = None;
+    loop {
+        std::thread::sleep(Duration::from_millis(300));
+        let rep = fs::read_to_string(&report).unwrap_or_default();
+        if rep.lines().any(|l| l == "done") {
+            break;
+        }
+        let st = crate::term::parse_status(&fs::read_to_string(&status).unwrap_or_default());
+        pid = pid.or(st.pid);
+        if let Some(code) = st.exit {
+            if code != 0 {
+                gone = Some(format!(
+                    "czyszczenie systemu nie zostało wykonane (sudo zakończyło się kodem {code}: złe hasło lub anulowano)"
+                ));
+            }
+            break;
+        }
+        match pid {
+            Some(p) if !crate::procs::Processes::pid_alive(p) => {
+                gone = Some("czyszczenie systemu przerwane: zamknięto okno terminala".into());
                 break;
             }
-            std::thread::sleep(Duration::from_millis(500));
+            Some(_) => {}
+            None if start.elapsed() > Duration::from_secs(30) => {
+                let _ = child.try_wait();
+                gone = Some(format!(
+                    "terminal {} nie uruchomił polecenia",
+                    terminal.display()
+                ));
+                break;
+            }
+            None => {}
         }
     }
+    // The terminal may still be open (or be a server client): reap it later.
+    if matches!(child.try_wait(), Ok(None)) {
+        std::thread::spawn(move || {
+            let _ = child.wait();
+        });
+    }
     let text = fs::read_to_string(&report).unwrap_or_default();
-    let _ = fs::remove_file(&report);
-    parse_report(&text)
+    cleanup();
+    let mut o = parse_report(&text);
+    if o.not_done.is_some() {
+        if let Some(g) = gone {
+            o.not_done = Some(g);
+        }
+    }
+    o
 }
 
 #[cfg(test)]
@@ -948,14 +939,11 @@ mod tests {
     }
 
     #[test]
-    fn task_args_roundtrip_and_terminal_args() {
+    fn task_args_roundtrip() {
         for t in RootTask::ALL {
             assert_eq!(RootTask::from_arg(t.arg()), Some(t));
         }
         assert_eq!(RootTask::from_arg("/etc"), None);
-        let a = terminal_args(Path::new("/usr/bin/alacritty"), "sudo", &["x".into()]);
-        assert_eq!(a[2], "-e");
-        assert_eq!(a[3], "sudo");
     }
 
     #[test]

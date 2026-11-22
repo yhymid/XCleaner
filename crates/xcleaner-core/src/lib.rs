@@ -12,6 +12,7 @@ pub mod protect;
 pub mod root;
 pub mod rules;
 pub mod scan;
+pub mod term;
 pub mod usage;
 
 /// True when running with effective UID 0.

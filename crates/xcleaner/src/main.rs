@@ -19,6 +19,10 @@ fn main() -> std::process::ExitCode {
             println!("XCleaner {}", env!("CARGO_PKG_VERSION"));
             std::process::ExitCode::SUCCESS
         }
+        Some(xcleaner_core::term::WRAP_ARG) => {
+            let rest: Vec<String> = args.iter().skip(1).cloned().collect();
+            std::process::ExitCode::from(xcleaner_core::term::run_wrapper(&rest).clamp(0, 255) as u8)
+        }
         Some(xcleaner_core::root::ROOT_ARG) => {
             let rest: Vec<String> = args
                 .iter()
