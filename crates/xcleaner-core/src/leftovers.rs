@@ -976,6 +976,35 @@ fn leftover_item(
     }
 }
 
+/// Diagnostics (`xcleaner --debug-evidence`): what the leftover detection
+/// knows, sorted, for comparing machines and versions.
+pub fn debug_dump(home: &Path) -> String {
+    let ev = Evidence::from_system(home);
+    let mut out = String::new();
+    let mut inst: Vec<_> = ev.installed.iter().collect();
+    inst.sort();
+    out.push_str(&format!("installed {}\n", inst.len()));
+    for i in inst {
+        out.push_str(&format!("i {i}\n"));
+    }
+    let mut rem: Vec<_> = ev.removed.iter().collect();
+    rem.sort_by(|a, b| a.0.cmp(b.0));
+    out.push_str(&format!("removed {}\n", rem.len()));
+    for (k, r) in rem {
+        out.push_str(&format!(
+            "r {k} {} {:?} {}\n",
+            r.package, r.installed_at, r.removed_at
+        ));
+    }
+    let mut first: Vec<_> = ev.removed_first.keys().collect();
+    first.sort();
+    out.push_str(&format!("removed_first {}\n", first.len()));
+    for f in first {
+        out.push_str(&format!("f {f}\n"));
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1103,33 +1132,4 @@ mod tests {
         assert!(flatpak_orphan("org.gone.App", &ev));
         assert!(!flatpak_orphan("notanid", &ev));
     }
-}
-
-/// Diagnostics (`xcleaner --debug-evidence`): what the leftover detection
-/// knows, sorted, for comparing machines and versions.
-pub fn debug_dump(home: &Path) -> String {
-    let ev = Evidence::from_system(home);
-    let mut out = String::new();
-    let mut inst: Vec<_> = ev.installed.iter().collect();
-    inst.sort();
-    out.push_str(&format!("installed {}\n", inst.len()));
-    for i in inst {
-        out.push_str(&format!("i {i}\n"));
-    }
-    let mut rem: Vec<_> = ev.removed.iter().collect();
-    rem.sort_by(|a, b| a.0.cmp(b.0));
-    out.push_str(&format!("removed {}\n", rem.len()));
-    for (k, r) in rem {
-        out.push_str(&format!(
-            "r {k} {} {:?} {}\n",
-            r.package, r.installed_at, r.removed_at
-        ));
-    }
-    let mut first: Vec<_> = ev.removed_first.keys().collect();
-    first.sort();
-    out.push_str(&format!("removed_first {}\n", first.len()));
-    for f in first {
-        out.push_str(&format!("f {f}\n"));
-    }
-    out
 }
