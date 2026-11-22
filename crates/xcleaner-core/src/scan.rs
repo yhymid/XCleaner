@@ -370,6 +370,12 @@ fn root_found() -> Vec<Found> {
                     format!("paccache -rk0 ({}): usuwa wszystkie pobrane paczki. Bez internetu nie da się ich wtedy przeinstalować ani cofnąć aktualizacji z cache.", p.detail),
                     Regen::Slow,
                 ),
+                RootTask::PacmanDownloads => (
+                    "root:pacman-downloads",
+                    "Puste katalogi po przerwanych pobraniach pacmana",
+                    format!("/var/cache/pacman/pkg/download-* ({}). Pacman zostawia je po przerwanej aktualizacji; usuwane są tylko puste.", p.detail),
+                    Regen::Never,
+                ),
                 RootTask::KernelModules => (
                     "root:kernel-modules",
                     "Moduły po usuniętych kernelach",
@@ -390,7 +396,10 @@ fn root_found() -> Vec<Found> {
                     },
                     regen,
                     targets: vec![(PathBuf::from(p.task.arg()), Action::Root(p.task))],
-                    guards: if matches!(p.task, RootTask::PacmanCache | RootTask::PacmanCacheAll) {
+                    guards: if matches!(
+                        p.task,
+                        RootTask::PacmanCache | RootTask::PacmanCacheAll | RootTask::PacmanDownloads
+                    ) {
                         vec!["pacman".into(), "yay".into(), "paru".into()]
                     } else {
                         Vec::new()

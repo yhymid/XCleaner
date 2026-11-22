@@ -26,6 +26,8 @@ pub const ROOT_ARG: &str = "--root-clean";
 const COREDUMP_DIR: &str = "/var/lib/systemd/coredump";
 const MODULES_DIR: &str = "/usr/lib/modules";
 const PACCACHE: &str = "/usr/bin/paccache";
+const PKG_DIR: &str = "/var/cache/pacman/pkg";
+const PACMAN_LOCK: &str = "/var/lib/pacman/db.lck";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum RootTask {
@@ -37,21 +39,24 @@ pub enum RootTask {
     PacmanCacheAll,
     /// /usr/lib/modules/<ver> of kernels no longer installed.
     KernelModules,
+    /// Empty `download-XXXXXX` dirs pacman 7 leaves after interrupted downloads.
+    PacmanDownloads,
 }
 
 impl RootTask {
-    pub const ALL: [RootTask; 4] = [
+    pub const ALL: [RootTask; 5] = [
         RootTask::Coredumps,
         RootTask::PacmanCache,
         RootTask::PacmanCacheAll,
         RootTask::KernelModules,
+        RootTask::PacmanDownloads,
     ];
 
     /// Where the task works (for display).
     pub fn location(self) -> &'static str {
         match self {
             RootTask::Coredumps => COREDUMP_DIR,
-            RootTask::PacmanCache | RootTask::PacmanCacheAll => "/var/cache/pacman/pkg",
+            RootTask::PacmanCache | RootTask::PacmanCacheAll | RootTask::PacmanDownloads => PKG_DIR,
             RootTask::KernelModules => MODULES_DIR,
         }
     }
@@ -62,6 +67,7 @@ impl RootTask {
             RootTask::PacmanCache => "pacman-cache",
             RootTask::PacmanCacheAll => "pacman-cache-all",
             RootTask::KernelModules => "kernel-modules",
+            RootTask::PacmanDownloads => "pacman-downloads",
         }
     }
 
@@ -287,6 +293,70 @@ fn probe_modules() -> Option<Probe> {
     })
 }
 
+// ---------------------------------------------- pacman download dirs
+
+/// `download-` + 6 alphanumerics (pacman's mkdtemp template).
+fn is_download_dir_name(name: &str) -> bool {
+    name.strip_prefix("download-")
+        .is_some_and(|r| r.len() == 6 && r.bytes().all(|b| b.is_ascii_alphanumeric()))
+}
+
+/// Stale download dirs: right name, real directory, untouched for an hour,
+/// and pacman not running. Emptiness is enforced by rmdir itself.
+fn stale_download_dirs() -> Vec<String> {
+    if Path::new(PACMAN_LOCK).exists() {
+        return Vec::new();
+    }
+    let hour_ago = std::time::SystemTime::now() - Duration::from_secs(3600);
+    let Ok(rd) = fs::read_dir(PKG_DIR) else {
+        return Vec::new();
+    };
+    let mut v: Vec<String> = rd
+        .flatten()
+        .filter_map(|e| {
+            let name = e.file_name().into_string().ok()?;
+            let m = fs::symlink_metadata(e.path()).ok()?;
+            let old = m.modified().ok().is_some_and(|t| t < hour_ago);
+            (is_download_dir_name(&name) && m.is_dir() && old).then_some(name)
+        })
+        .collect();
+    v.sort();
+    v
+}
+
+fn probe_pacman_downloads() -> Option<Probe> {
+    let dirs = stale_download_dirs();
+    (!dirs.is_empty()).then(|| Probe {
+        task: RootTask::PacmanDownloads,
+        bytes: 0,
+        files: dirs.len() as u64,
+        detail: format!("{} katalogów", dirs.len()),
+    })
+}
+
+fn root_pacman_downloads() -> (u64, Vec<String>) {
+    say("• Puste katalogi po przerwanych pobraniach pacmana…");
+    let dirs = stale_download_dirs();
+    let mut removed = 0;
+    let mut errs = Vec::new();
+    for d in &dirs {
+        let Ok(c) = std::ffi::CString::new(format!("{PKG_DIR}/{d}")) else {
+            continue;
+        };
+        // rmdir(2) removes only an empty directory and never follows a symlink.
+        if unsafe { libc::rmdir(c.as_ptr()) } == 0 {
+            removed += 1;
+        } else {
+            let e = io::Error::last_os_error();
+            if e.raw_os_error() != Some(libc::ENOTEMPTY) {
+                errs.push(format!("{d}: {e}"));
+            }
+        }
+    }
+    say(&format!("  usunięto {removed} z {} katalogów", dirs.len()));
+    (0, errs)
+}
+
 /// Read-only look at everything phase 2 could clean.
 pub fn probe_all() -> Vec<Probe> {
     [
@@ -294,6 +364,7 @@ pub fn probe_all() -> Vec<Probe> {
         probe_pacman_cache(),
         probe_pacman_cache_all(),
         probe_modules(),
+        probe_pacman_downloads(),
     ]
     .into_iter()
     .flatten()
@@ -387,6 +458,7 @@ pub fn run_root(args: &[String]) -> i32 {
             RootTask::PacmanCache => root_paccache(&[&["-r", "-k2"], &["-r", "-u", "-k0"]]),
             RootTask::PacmanCacheAll => root_paccache(&[&["-r", "-k0"]]),
             RootTask::KernelModules => root_modules(),
+            RootTask::PacmanDownloads => root_pacman_downloads(),
         };
         report.line("freed", t, &freed.to_string());
         for e in &errs {
@@ -727,6 +799,14 @@ mod tests {
         let a = terminal_args(Path::new("/usr/bin/alacritty"), "sudo", &["x".into()]);
         assert_eq!(a[2], "-e");
         assert_eq!(a[3], "sudo");
+    }
+
+    #[test]
+    fn download_dir_names() {
+        assert!(is_download_dir_name("download-0d9PlD"));
+        assert!(!is_download_dir_name("download-"));
+        assert!(!is_download_dir_name("download-abc/de"));
+        assert!(!is_download_dir_name("linux-7.3.5.pkg.tar.zst"));
     }
 
     #[test]
