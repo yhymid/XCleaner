@@ -1,5 +1,7 @@
 # Upstream cleaners study (2026-11)
 
+**English** | [Polski](UPSTREAM-CLEANERS-2026-11.pl.md)
+
 Research for XCleaner (Rust + GTK4/libadwaita, MIT). Phase 1 = `$HOME` only, phase 2 = `/` via sudo root broker.
 All facts come from shallow clones of the upstream repos (HEAD as of 2026-11-22), crates.io API and official docs.
 Statements marked **(observed)** were measured on the dev machine (CachyOS, btrfs, 8 threads, `$HOME` = 441 GiB, 1.14 M entries).

@@ -1,5 +1,7 @@
 # Leftovers of uninstalled applications in HOME — detection design (2026-11-22)
 
+**English** | [Polski](LEFTOVERS-DETECTION-2026-11.pl.md)
+
 Owner question (PL, paraphrased): "Uninstallers never remove everything. Leftovers of removed apps
 always stay in `~/.config` and `~/.local`. How can we check, or prove, which dirs are leftovers?"
 

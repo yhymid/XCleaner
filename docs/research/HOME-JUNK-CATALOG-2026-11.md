@@ -1,5 +1,7 @@
 # $HOME junk catalog (research, 2026-11-22)
 
+**English** | [Polski](HOME-JUNK-CATALOG-2026-11.pl.md)
+
 Scope: Phase 1, `$HOME` only. Read-only measurements on the owner's machine (Steam Deck OLED, CachyOS deckify kernel 7.3.4, Hyprland). `/home` is btrfs `@home`, 475 GB, **460 GB used, 15 GB free (98%)**.
 Method: `du -xsh`, `find`, `stat` (incl. birth time `%w`), `pgrep -x`, `coredumpctl list`, `flatpak list`. No file contents were read except Steam manifest `name`/`LastPlayed` keys and Proton `config_info` (first lines: Proton version, paths).
 Reused, not redone: `~/Pobrane/test/xu-integration/docs/research/RESEARCH-WAVE2-2026-11.md` (sections 03 Steam, 06 Electron, 14 coredumps).
