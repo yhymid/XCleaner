@@ -188,6 +188,54 @@ const PERSONAL_MARKERS: &[&str] = &[
     "worlds",
 ];
 
+/// One package event from a package manager's log.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EvKind {
+    Install,
+    Upgrade,
+    Remove,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PkgEvent {
+    pub pkg: String,
+    pub kind: EvKind,
+    pub ts: i64,
+}
+
+/// `[2026-06-24T04:59:58+0200] [ALPM] removed foo (1-1)` lines.
+pub fn parse_pacman_log(log: &str) -> Vec<PkgEvent> {
+    let mut out = Vec::new();
+    for line in log.lines() {
+        let Some(rest) = line.strip_prefix('[') else {
+            continue;
+        };
+        let Some((ts, rest)) = rest.split_once(']') else {
+            continue;
+        };
+        let Some(rest) = rest.trim_start().strip_prefix("[ALPM] ") else {
+            continue;
+        };
+        let Some(t) = parse_ts(ts) else { continue };
+        let mut it = rest.splitn(3, ' ');
+        let (Some(ev), Some(pkg)) = (it.next(), it.next()) else {
+            continue;
+        };
+        let kind = match ev {
+            "installed" | "reinstalled" => EvKind::Install,
+            "upgraded" | "downgraded" => EvKind::Upgrade,
+            "removed" => EvKind::Remove,
+            _ => continue,
+        };
+        out.push(PkgEvent {
+            pkg: pkg.to_string(),
+            kind,
+            ts: t,
+        });
+    }
+    out
+}
+
 #[derive(Debug, Clone)]
 pub struct Removed {
     pub package: String,
@@ -271,35 +319,27 @@ pub fn format_date(ts: i64) -> String {
 impl Evidence {
     /// Feed pacman.log text. Last event per package wins.
     pub fn add_pacman_log(&mut self, log: &str, installed_pkgs: &HashSet<String>) {
+        self.add_events(&parse_pacman_log(log), installed_pkgs);
+    }
+
+    /// Feed package events in chronological order. Last event per package
+    /// wins; a package that is installed again is not removed.
+    pub fn add_events(&mut self, events: &[PkgEvent], installed_pkgs: &HashSet<String>) {
         let mut last_install: HashMap<&str, i64> = HashMap::new();
         let mut removed: HashMap<&str, (Option<i64>, i64)> = HashMap::new();
-        for line in log.lines() {
-            let Some(rest) = line.strip_prefix('[') else {
-                continue;
-            };
-            let Some((ts, rest)) = rest.split_once(']') else {
-                continue;
-            };
-            let Some(rest) = rest.trim_start().strip_prefix("[ALPM] ") else {
-                continue;
-            };
-            let Some(t) = parse_ts(ts) else { continue };
-            let mut it = rest.splitn(3, ' ');
-            let (Some(ev), Some(pkg)) = (it.next(), it.next()) else {
-                continue;
-            };
-            match ev {
-                "installed" | "reinstalled" => {
-                    last_install.insert(pkg, t);
+        for e in events {
+            let pkg = e.pkg.as_str();
+            match e.kind {
+                EvKind::Install => {
+                    last_install.insert(pkg, e.ts);
                     removed.remove(pkg);
                 }
-                "upgraded" | "downgraded" => {
+                EvKind::Upgrade => {
                     removed.remove(pkg);
                 }
-                "removed" => {
-                    removed.insert(pkg, (last_install.get(pkg).copied(), t));
+                EvKind::Remove => {
+                    removed.insert(pkg, (last_install.get(pkg).copied(), e.ts));
                 }
-                _ => {}
             }
         }
         for (pkg, (inst, rm)) in removed {
@@ -424,7 +464,7 @@ impl Evidence {
         }
     }
 
-    fn add_installed(&mut self, name: &str) {
+    pub(crate) fn add_installed(&mut self, name: &str) {
         let s = squash(name);
         if !s.is_empty() {
             self.installed.insert(s);
@@ -447,47 +487,20 @@ impl Evidence {
     /// Read the real system (no root needed).
     pub fn from_system(home: &Path) -> Self {
         let mut ev = Evidence::default();
+        // Every package database present (pacman, dpkg, rpm/zypper): their
+        // installed identities, then their removal events.
+        let systems = crate::pkgdb::detect();
         let mut pkgs = HashSet::new();
-        if let Ok(rd) = fs::read_dir("/var/lib/pacman/local") {
-            for e in rd.flatten() {
-                let dir = e.path();
-                if let Ok(desc) = fs::read_to_string(dir.join("desc")) {
-                    let mut section = "";
-                    for l in desc.lines() {
-                        if l.starts_with('%') {
-                            section = l;
-                            continue;
-                        }
-                        if l.is_empty() {
-                            continue;
-                        }
-                        match section {
-                            "%NAME%" => {
-                                pkgs.insert(l.to_string());
-                                ev.add_installed(l);
-                            }
-                            "%BASE%" => ev.add_installed(l),
-                            "%PROVIDES%" | "%REPLACES%" => {
-                                let n = l.split(['=', '<', '>']).next().unwrap_or(l);
-                                ev.add_installed(n);
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-                if let Ok(files) = fs::read_to_string(dir.join("files")) {
-                    for f in files.lines() {
-                        for name in path_identities(f) {
-                            ev.add_installed(&name);
-                        }
-                    }
-                }
+        for sys in &systems {
+            pkgs.extend(sys.names.iter().cloned());
+            for id in &sys.identities {
+                ev.add_installed(id);
             }
         }
-        if let Ok(log) = fs::read("/var/log/pacman.log") {
-            ev.add_pacman_log(&String::from_utf8_lossy(&log), &pkgs);
+        for sys in &systems {
+            ev.add_events(&sys.events, &pkgs);
         }
-        if files_db_enabled() {
+        if files_db_enabled() && systems.iter().any(|s| s.kind == "pacman") {
             ev.add_files_db_aliases();
         }
         if let Some(path) = std::env::var_os("PATH") {
@@ -560,8 +573,14 @@ impl Evidence {
 
 /// Identity names a packaged file path gives: `usr/bin/<x>`,
 /// `usr/share/applications/<x>.desktop`, `opt/<x>/…`, `etc/xdg/<x>`.
-fn path_identities(f: &str) -> Vec<String> {
-    let name = if let Some(b) = f.strip_prefix("usr/bin/") {
+pub(crate) fn path_identities(f: &str) -> Vec<String> {
+    // pacman lists `usr/bin/x`; dpkg and rpm list `/usr/bin/x` (and `/bin/x`).
+    let f = f.trim_start_matches('/');
+    let name = if let Some(b) = f
+        .strip_prefix("usr/bin/")
+        .or_else(|| f.strip_prefix("bin/"))
+        .or_else(|| f.strip_prefix("usr/games/"))
+    {
         b
     } else if let Some(d) = f
         .strip_prefix("usr/share/applications/")
@@ -1084,4 +1103,33 @@ mod tests {
         assert!(flatpak_orphan("org.gone.App", &ev));
         assert!(!flatpak_orphan("notanid", &ev));
     }
+}
+
+/// Diagnostics (`xcleaner --debug-evidence`): what the leftover detection
+/// knows, sorted, for comparing machines and versions.
+pub fn debug_dump(home: &Path) -> String {
+    let ev = Evidence::from_system(home);
+    let mut out = String::new();
+    let mut inst: Vec<_> = ev.installed.iter().collect();
+    inst.sort();
+    out.push_str(&format!("installed {}\n", inst.len()));
+    for i in inst {
+        out.push_str(&format!("i {i}\n"));
+    }
+    let mut rem: Vec<_> = ev.removed.iter().collect();
+    rem.sort_by(|a, b| a.0.cmp(b.0));
+    out.push_str(&format!("removed {}\n", rem.len()));
+    for (k, r) in rem {
+        out.push_str(&format!(
+            "r {k} {} {:?} {}\n",
+            r.package, r.installed_at, r.removed_at
+        ));
+    }
+    let mut first: Vec<_> = ev.removed_first.keys().collect();
+    first.sort();
+    out.push_str(&format!("removed_first {}\n", first.len()));
+    for f in first {
+        out.push_str(&format!("f {f}\n"));
+    }
+    out
 }

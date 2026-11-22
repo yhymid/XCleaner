@@ -32,6 +32,14 @@ fn main() -> std::process::ExitCode {
                 .collect();
             std::process::ExitCode::from(xcleaner_core::root::run_root(&rest) as u8)
         }
+        Some("--debug-evidence") => {
+            xcleaner_core::default_sigpipe();
+            let Some(layout) = scan::Layout::from_env() else {
+                return std::process::ExitCode::FAILURE;
+            };
+            print!("{}", xcleaner_core::leftovers::debug_dump(&layout.home));
+            std::process::ExitCode::SUCCESS
+        }
         Some("--usage") | Some("--scan") => {
             xcleaner_core::default_sigpipe();
             if first == Some("--usage") {

@@ -10,6 +10,7 @@ pub mod kernels;
 pub mod leftovers;
 pub mod locks;
 pub mod pkgcache;
+pub mod pkgdb;
 pub mod procs;
 pub mod protect;
 pub mod root;
