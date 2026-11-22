@@ -9,7 +9,7 @@
 //! every target itself (it never trusts paths from the GUI), deletes through
 //! the descriptor engine and writes a short report into a file the GUI
 //! created in its private XDG_RUNTIME_DIR (checked: regular, owned by
-//! SUDO_UID, no symlink).
+//! the invoking user (--uid, cross-checked with SUDO_UID/DOAS_USER), no symlink).
 
 use crate::fsops::{Home, Usage};
 use std::{
@@ -563,7 +563,8 @@ impl Report {
     }
 }
 
-/// Open the GUI's report file safely: no symlink, regular, owned by SUDO_UID.
+/// Open the GUI's report file safely: no symlink, regular, owned by the
+/// user who started the clean.
 fn open_report(path: &Path, uid: u32) -> io::Result<fs::File> {
     let f = fs::OpenOptions::new()
         .write(true)
@@ -585,25 +586,51 @@ fn say(msg: &str) {
     let _ = io::stdout().flush();
 }
 
+/// The user the report belongs to: `--uid` (sudo, doas and su all work),
+/// which must agree with what sudo (SUDO_UID) or doas (DOAS_USER) say.
+/// Older callers without `--uid` still work under sudo.
+fn invoking_uid(arg: Option<u32>) -> Result<u32, String> {
+    let sudo = std::env::var("SUDO_UID")
+        .ok()
+        .and_then(|u| u.parse::<u32>().ok());
+    let doas = std::env::var("DOAS_USER")
+        .ok()
+        .and_then(|n| uid_of_user(&n));
+    let uid = arg
+        .or(sudo)
+        .or(doas)
+        .ok_or("brak --uid — uruchom z programu XCleaner")?;
+    if uid == 0 {
+        return Err("--uid 0: raport musi należeć do zwykłego użytkownika".into());
+    }
+    for (src, v) in [("SUDO_UID", sudo), ("DOAS_USER", doas)] {
+        if v.is_some_and(|v| v != uid) {
+            return Err(format!("--uid {uid} nie zgadza się z {src}"));
+        }
+    }
+    Ok(uid)
+}
+
+fn uid_of_user(name: &str) -> Option<u32> {
+    let c = std::ffi::CString::new(name).ok()?;
+    let pw = unsafe { libc::getpwnam(c.as_ptr()) };
+    (!pw.is_null()).then(|| unsafe { (*pw).pw_uid })
+}
+
 /// Entry point of `--root-clean`. Returns the process exit code.
 pub fn run_root(args: &[String]) -> i32 {
     if unsafe { libc::geteuid() } != 0 {
-        eprintln!("--root-clean wymaga uruchomienia przez sudo");
+        eprintln!("--root-clean wymaga uprawnień roota (sudo, doas albo su)");
         return 2;
     }
-    let Some(uid) = std::env::var("SUDO_UID")
-        .ok()
-        .and_then(|u| u.parse::<u32>().ok())
-    else {
-        eprintln!("brak SUDO_UID — uruchom przez sudo z programu XCleaner");
-        return 2;
-    };
     let mut report_path = None;
+    let mut uid_arg: Option<u32> = None;
     let mut tasks = Vec::new();
     let mut it = args.iter();
     while let Some(a) = it.next() {
         match a.as_str() {
             "--report" => report_path = it.next().map(PathBuf::from),
+            "--uid" => uid_arg = it.next().and_then(|u| u.parse().ok()),
             other => match RootTask::from_arg(other) {
                 Some(t) if !tasks.contains(&t) => tasks.push(t),
                 Some(_) => {}
@@ -617,6 +644,13 @@ pub fn run_root(args: &[String]) -> i32 {
     let Some(report_path) = report_path else {
         eprintln!("brak --report");
         return 2;
+    };
+    let uid = match invoking_uid(uid_arg) {
+        Ok(u) => u,
+        Err(e) => {
+            eprintln!("{e}");
+            return 2;
+        }
     };
     let mut report = match open_report(&report_path, uid) {
         Ok(f) => Report { file: f },
@@ -730,8 +764,6 @@ fn root_modules() -> (u64, Vec<String>) {
 
 // ------------------------------------------------------- GUI-side launch
 
-const TITLE: &str = "XCleaner — hasło sudo";
-
 fn is_executable(p: &Path) -> bool {
     use std::os::unix::fs::PermissionsExt;
     fs::metadata(p)
@@ -783,7 +815,7 @@ pub fn parse_report(text: &str) -> RootOutcome {
     o
 }
 
-/// Run the tasks as root via `sudo` in a terminal and wait for the result.
+/// Run the tasks as root (sudo, doas or su) in a terminal and wait for the result.
 ///
 /// The terminal runs our wrapper (see `term.rs`), which records its PID and
 /// the exit code of sudo in a status file. The end is: `done` in the report,
@@ -792,6 +824,9 @@ pub fn launch(tasks: &[RootTask]) -> RootOutcome {
     let fail = |m: &str| RootOutcome {
         not_done: Some(m.into()),
         ..Default::default()
+    };
+    let Some(elevate) = crate::term::find_elevate() else {
+        return fail("brak sudo, doas i su");
     };
     let Some(terminal) = crate::term::find_terminal() else {
         return fail("nie znaleziono emulatora terminala (np. kitty, foot, konsole)");
@@ -814,21 +849,31 @@ pub fn launch(tasks: &[RootTask]) -> RootOutcome {
         let _ = fs::remove_file(&report);
         let _ = fs::remove_file(&status);
     };
-    let mut cmd: Vec<OsString> = vec![
-        me.clone().into(),
-        crate::term::WRAP_ARG.into(),
-        status.clone().into(),
-        "--".into(),
-        "sudo".into(),
+    let uid = unsafe { libc::getuid() };
+    let mut root_cmd: Vec<OsString> = vec![
         "env".into(),
         "APPIMAGELAUNCHER_DISABLE=1".into(),
-        me.into(),
+        me.clone().into(),
         ROOT_ARG.into(),
+        "--uid".into(),
+        uid.to_string().into(),
         "--report".into(),
         report.clone().into(),
     ];
-    cmd.extend(tasks.iter().map(|t| OsString::from(t.arg())));
-    let args = crate::term::terminal_args(&terminal, TITLE, &cmd);
+    root_cmd.extend(tasks.iter().map(|t| OsString::from(t.arg())));
+    let mut cmd: Vec<OsString> = vec![
+        me.into(),
+        crate::term::WRAP_ARG.into(),
+        status.clone().into(),
+        "--".into(),
+    ];
+    cmd.extend(elevate.wrap(&root_cmd));
+    let title = format!(
+        "XCleaner — {} ({})",
+        elevate.password_hint(),
+        elevate.label()
+    );
+    let args = crate::term::terminal_args(&terminal, &title, &cmd);
     let mut child = match crate::host_command(&terminal)
         .args(&args)
         .stdin(Stdio::null())
@@ -856,7 +901,8 @@ pub fn launch(tasks: &[RootTask]) -> RootOutcome {
         if let Some(code) = st.exit {
             if code != 0 {
                 gone = Some(format!(
-                    "czyszczenie systemu nie zostało wykonane (sudo zakończyło się kodem {code}: złe hasło lub anulowano)"
+                    "czyszczenie systemu nie zostało wykonane ({} zakończyło się kodem {code}: złe hasło lub anulowano)",
+                    elevate.label()
                 ));
             }
             break;
@@ -936,6 +982,16 @@ mod tests {
         assert_eq!(o.errors.len(), 1);
         assert!(o.not_done.is_none());
         assert!(parse_report("freed\tcoredumps\t5\n").not_done.is_some());
+    }
+
+    #[test]
+    fn invoking_uid_rules() {
+        // Tests do not run under sudo/doas: only --uid is seen.
+        if std::env::var_os("SUDO_UID").is_none() && std::env::var_os("DOAS_USER").is_none() {
+            assert_eq!(invoking_uid(Some(1000)), Ok(1000));
+            assert!(invoking_uid(Some(0)).is_err());
+            assert!(invoking_uid(None).is_err());
+        }
     }
 
     #[test]

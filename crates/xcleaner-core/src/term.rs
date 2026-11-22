@@ -123,7 +123,7 @@ pub fn find_terminal() -> Option<PathBuf> {
 }
 
 /// POSIX shell quoting, for terminals that re-split one command string.
-fn shell_quote(a: &std::ffi::OsStr) -> String {
+pub(crate) fn shell_quote(a: &std::ffi::OsStr) -> String {
     let s = a.to_string_lossy();
     if !s.is_empty()
         && s.bytes()
@@ -200,6 +200,72 @@ pub fn terminal_args(terminal: &Path, title: &str, cmd: &[OsString]) -> Vec<OsSt
         "xdg-terminal-exec" => rest(vec![format!("--title={title}").into()]),
         _ => rest(vec!["-T".into(), t(), "-e".into()]),
     }
+}
+
+// ------------------------------------------------------- root elevation
+
+/// How the terminal becomes root. No polkit (owner's decision): only tools
+/// that ask for the password in the terminal itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Elevate {
+    Sudo,
+    Doas,
+    /// `su root -c '…'`: root's password (Debian with a root password has no sudo).
+    Su,
+}
+
+impl Elevate {
+    pub fn label(self) -> &'static str {
+        match self {
+            Elevate::Sudo => "sudo",
+            Elevate::Doas => "doas",
+            Elevate::Su => "su",
+        }
+    }
+
+    /// What the terminal window asks for.
+    pub fn password_hint(self) -> &'static str {
+        match self {
+            Elevate::Sudo | Elevate::Doas => "hasło użytkownika",
+            Elevate::Su => "hasło roota",
+        }
+    }
+
+    /// Prefix `cmd` (cmd[0] is the program) with this tool.
+    pub fn wrap(self, cmd: &[OsString]) -> Vec<OsString> {
+        match self {
+            Elevate::Sudo | Elevate::Doas => {
+                let mut v: Vec<OsString> = vec![self.label().into()];
+                v.extend(cmd.iter().cloned());
+                v
+            }
+            // su runs one shell command string; `root` before -c works with
+            // util-linux (getopt permutes) and busybox (-c after USER).
+            Elevate::Su => vec![
+                "su".into(),
+                "root".into(),
+                "-c".into(),
+                cmd.iter()
+                    .map(|a| shell_quote(a))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+                    .into(),
+            ],
+        }
+    }
+}
+
+fn in_path(name: &str) -> bool {
+    std::env::var_os("PATH")
+        .map(|p| std::env::split_paths(&p).any(|d| is_executable(&d.join(name))))
+        .unwrap_or(false)
+}
+
+/// sudo, else doas, else su (always present on a normal system).
+pub fn find_elevate() -> Option<Elevate> {
+    [Elevate::Sudo, Elevate::Doas, Elevate::Su]
+        .into_iter()
+        .find(|e| in_path(e.label()))
 }
 
 // ------------------------------------------------------------ status file
@@ -325,6 +391,22 @@ mod tests {
         assert_eq!(desktop_terminals("KDE"), &["konsole"]);
         assert_eq!(desktop_terminals("gnome")[0], "ptyxis");
         assert!(desktop_terminals("Hyprland").is_empty());
+    }
+
+    #[test]
+    fn elevation_argv() {
+        let cmd: Vec<OsString> = vec!["/opt/My Apps/x".into(), "--root-clean".into()];
+        assert_eq!(Elevate::Sudo.wrap(&cmd)[0], "sudo");
+        assert_eq!(Elevate::Doas.wrap(&cmd)[1], "/opt/My Apps/x");
+        assert_eq!(
+            Elevate::Su.wrap(&cmd),
+            vec![
+                OsString::from("su"),
+                "root".into(),
+                "-c".into(),
+                "'/opt/My Apps/x' --root-clean".into()
+            ]
+        );
     }
 
     #[test]

@@ -397,7 +397,7 @@ fn confirm_clean(state: &Rc<State>) {
     };
     let root = sel.iter().any(|f| f.item.category == Category::SystemRoot);
     let note = if root {
-        format!("{note}\n\nDo czyszczenia systemu otworzy się terminal — wpisz tam hasło sudo.")
+        format!("{note}\n\nDo czyszczenia systemu otworzy się terminal — wpisz tam hasło (sudo, doas albo su).")
     } else {
         note
     };
@@ -503,7 +503,7 @@ fn show_details(state: &Rc<State>, f: &Found) {
         paths.add(
             &adw::ActionRow::builder()
                 .title(xcleaner_core::rules::target_label(rel, action))
-                .subtitle("katalog systemowy — czyszczony przez sudo")
+                .subtitle("katalog systemowy — czyszczony z uprawnieniami roota")
                 .build(),
         );
     }

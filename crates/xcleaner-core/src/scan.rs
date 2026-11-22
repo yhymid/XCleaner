@@ -605,7 +605,7 @@ pub fn clean(layout: &Layout, items: &[Item]) -> std::io::Result<CleanReport> {
                 ""
             };
             log.push(format!(
-                "{ts}\t{id}\tzwolniono {}\tbłędy {errors}\t{} (sudo){status}",
+                "{ts}\t{id}\tzwolniono {}\tbłędy {errors}\t{} (root){status}",
                 crate::format_size(freed),
                 t.location()
             ));
