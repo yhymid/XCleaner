@@ -162,7 +162,8 @@ fn status_page(icon: &str, title: &str, desc: &str) -> adw::StatusPage {
 }
 
 fn busy_page(title: &str) -> gtk::Widget {
-    let spinner = adw::Spinner::new();
+    let spinner = gtk::Spinner::new();
+    spinner.start();
     spinner.set_size_request(48, 48);
     let page = adw::StatusPage::builder().title(title).build();
     page.set_child(Some(&spinner));

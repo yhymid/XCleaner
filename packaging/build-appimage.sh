@@ -29,7 +29,8 @@ print('\x1f'.join(f for f in flags if f), end='')
 PY
 )"
 cargo build --locked --release -p xcleaner
-test -x target/release/xcleaner
+bin="${CARGO_TARGET_DIR:-$root/target}/release/xcleaner"
+test -x "$bin"
 
 linuxdeploy="$build/tools/linuxdeploy-x86_64.AppImage"
 gtk_plugin="$build/tools/linuxdeploy-plugin-gtk.sh"
@@ -67,7 +68,7 @@ export APPIMAGE_EXTRACT_AND_RUN=1
 export DEPLOY_GTK_VERSION=4
 "$runtime" \
   --appdir "$build/AppDir" \
-  --executable "$root/target/release/xcleaner" \
+  --executable "$bin" \
   --desktop-file "$root/packaging/io.github.yhymid.XCleaner.desktop" \
   --icon-file "$root/packaging/io.github.yhymid.XCleaner.svg" \
   --plugin gtk

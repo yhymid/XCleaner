@@ -128,7 +128,7 @@ sprawdzamy w VM w v0.3.0.
 
 1. [x] Bezpieczeństwo: stanowe katalogi w `~/.cache` (sesje XFCE, schowek xfce4, obexd, ibus,
    JetBrains Local History, kioexec, evolution, tracker3) — nigdy domyślnie zaznaczone.
-2. [ ] Przenośny build:
+2. [~] Przenośny build (cechy GTK zrobione, kontener czeka na subuid):
    - `gtk4 v4_10` + `adw v1_5`, `adw::Spinner` → `gtk::Spinner`;
    - AppImage budowany w kontenerze `ubuntu:24.04` (glibc 2.39 zamiast 2.44).
 3. [ ] Środowisko AppImage nie przecieka do programów systemu: `GI_TYPELIB_PATH`, `XDG_DATA_DIRS`,
