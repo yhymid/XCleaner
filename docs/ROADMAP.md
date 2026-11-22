@@ -62,11 +62,15 @@ maszyny, a UPSTREAM-CLEANERS opisuje BleachBit, czkawka, kondo, CCleaner i inne.
   - dopasowania po pierwszym członie nazwy (evolution-data-server → evolution);
   - rekordy XUninstaller, dotdiry `~/.<nazwa>`.
 
-## v0.0.4 — średnie
-- [ ] Okno szczegółów pozycji: lista ścieżek z rozmiarami, otwórz w menedżerze plików.
-- [ ] Dziennik „Zdarzenia”: co i ile usunięto, błędy, eksport .md (jak w XU).
-- [ ] Flatpak: `~/.var/app/*/cache`.
-- [ ] Lista wyjątków użytkownika („nie ruszaj tego”).
+## v0.0.4 — średnie (zrobione)
+- [x] Okno szczegółów (⋮): każda ścieżka z rozmiarem, otwieranie w menedżerze plików,
+  przycisk „Nie ruszaj tego — ukryj na stałe”.
+- [x] Lista wyjątków `~/.config/xcleaner/keep.txt` (edytowalna ręcznie), przycisk
+  „Przywróć ukryte (N)”.
+- [x] Dziennik „Zdarzenia”: skany, czyszczenia, błędy, kopiowanie i zapis .md
+  (ścieżka HOME zamieniana na `~`). Trwała historia w `~/.local/state/xcleaner/history.log`.
+- [x] Flatpak: `~/.var/app/<id>/cache` zainstalowanych aplikacji.
+- [x] Resztki „możliwe” (pierwszy człon nazwy); AppImage’y liczone jako zainstalowane.
 
 ## v0.0.5 — duże
 - [ ] Artefakty budowania projektów w stylu kondo/npkill:

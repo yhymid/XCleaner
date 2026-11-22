@@ -3,6 +3,8 @@
 
 pub mod extra;
 pub mod fsops;
+pub mod history;
+pub mod keep;
 pub mod leftovers;
 pub mod procs;
 pub mod protect;

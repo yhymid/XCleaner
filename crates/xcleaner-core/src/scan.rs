@@ -66,6 +66,8 @@ impl Layout {
 pub struct Found {
     pub item: Item,
     pub usage: Usage,
+    /// Size of each existing target (same order as `item.targets`, missing ones absent).
+    pub parts: Vec<(PathBuf, Usage)>,
     /// Why it cannot be cleaned right now (e.g. app running).
     pub blocked: Option<String>,
     pub errors: Vec<String>,
@@ -74,6 +76,8 @@ pub struct Found {
 #[derive(Debug, Clone)]
 pub struct ScanResult {
     pub found: Vec<Found>,
+    /// Items hidden by the user's keep-list.
+    pub hidden: usize,
     pub elapsed: Duration,
 }
 
@@ -358,18 +362,26 @@ pub fn scan(layout: &Layout) -> std::io::Result<ScanResult> {
         .map(|item| Found {
             blocked: None,
             usage: Usage::default(),
+            parts: Vec::new(),
             errors: Vec::new(),
             item,
         })
         .collect();
     for ((i, p), r) in jobs.iter().zip(measured) {
         match r {
-            Ok(Some(u)) => found[*i].usage.add(u),
+            Ok(Some(u)) => {
+                found[*i].usage.add(u);
+                found[*i].parts.push((p.clone(), u));
+            }
             Ok(None) => {}
             Err(e) => found[*i].errors.push(format!("{}: {e}", p.display())),
         }
     }
     found.retain(|f| f.usage.files > 0 || !f.errors.is_empty());
+    let keep = crate::keep::KeepList::load();
+    let before = found.len();
+    found.retain(|f| !keep.contains(&f.item.id));
+    let hidden = before - found.len();
     for f in &mut found {
         f.blocked = blocked_reason(&f.item, &procs, &layout.home);
         if f.item.preselect && f.usage.shared_bytes * 2 > f.usage.bytes {
@@ -389,6 +401,7 @@ pub fn scan(layout: &Layout) -> std::io::Result<ScanResult> {
     }
     Ok(ScanResult {
         found,
+        hidden,
         elapsed: start.elapsed(),
     })
 }
@@ -407,7 +420,11 @@ pub fn clean(layout: &Layout, items: &[Item]) -> std::io::Result<CleanReport> {
     let home = Home::open(&layout.home)?;
     let procs = Processes::snapshot();
     let mut rep = CleanReport::default();
+    let mut log = Vec::new();
+    let ts = crate::history::stamp(crate::history::now());
     for item in items {
+        let freed_before = rep.freed.bytes;
+        let errors_before = rep.errors.len();
         if let Some(why) = blocked_reason(item, &procs, &layout.home) {
             rep.blocked.push(format!("{}: {why}", item.name));
             continue;
@@ -437,7 +454,26 @@ pub fn clean(layout: &Layout, items: &[Item]) -> std::io::Result<CleanReport> {
                 Err(e) => rep.errors.push(format!("{}: {e}", rel.display())),
             }
         }
+        let targets: Vec<String> = item
+            .targets
+            .iter()
+            .map(|(p, _)| format!("~/{}", p.display()))
+            .collect();
+        log.push(format!(
+            "{ts}\t{}\tzwolniono {}\tbłędy {}\t{}",
+            item.id,
+            crate::format_size(rep.freed.bytes - freed_before),
+            rep.errors.len() - errors_before,
+            targets.join(" ")
+        ));
     }
+    for b in &rep.blocked {
+        log.push(format!("{ts}\tpominięto\t{b}"));
+    }
+    for e in &rep.errors {
+        log.push(format!("{ts}\tbłąd\t{e}"));
+    }
+    crate::history::append(&log);
     Ok(rep)
 }
 
@@ -454,6 +490,8 @@ mod tests {
 
     #[test]
     fn discovers_electron_and_cachedir_tag_but_not_login_data() {
+        std::env::set_var("XCLEANER_NO_HISTORY", "1");
+        std::env::set_var("XCLEANER_KEEP_FILE", "/nonexistent/xcleaner-keep.txt");
         let home = tmp("disc");
         let app = home.join(".config/someapp");
         fs::create_dir_all(app.join("Cache/Cache_Data")).unwrap();

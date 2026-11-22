@@ -91,5 +91,8 @@ fn cli_scan(details: bool) -> std::process::ExitCode {
         format_size(selected),
         res.elapsed.as_millis()
     );
+    if res.hidden > 0 {
+        println!("Ukryte przez listę wyjątków: {}", res.hidden);
+    }
     std::process::ExitCode::SUCCESS
 }

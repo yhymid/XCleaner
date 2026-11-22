@@ -693,7 +693,7 @@ dependencies = [
 
 [[package]]
 name = "xcleaner"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "gtk4",
  "libadwaita",
@@ -702,7 +702,7 @@ dependencies = [
 
 [[package]]
 name = "xcleaner-core"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "libc",
 ]
