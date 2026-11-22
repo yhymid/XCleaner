@@ -9,6 +9,7 @@ pub enum Category {
     Browsers,
     Apps,
     Leftovers,
+    Projects,
     Development,
     Games,
     Trash,
@@ -16,11 +17,12 @@ pub enum Category {
 }
 
 impl Category {
-    pub const ALL: [Category; 8] = [
+    pub const ALL: [Category; 9] = [
         Category::System,
         Category::Browsers,
         Category::Apps,
         Category::Leftovers,
+        Category::Projects,
         Category::Development,
         Category::Games,
         Category::Trash,
@@ -33,6 +35,7 @@ impl Category {
             Category::Browsers => "Przeglądarki",
             Category::Apps => "Aplikacje (Electron/Chromium)",
             Category::Leftovers => "Pozostałości po odinstalowanych aplikacjach",
+            Category::Projects => "Projekty — artefakty budowania",
             Category::Development => "Programowanie i pakiety",
             Category::Games => "Gry",
             Category::Trash => "Kosz",

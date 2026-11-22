@@ -1,6 +1,7 @@
 //! XCleaner core: rules, scanning and safe deletion. No GTK here.
 #![cfg(target_os = "linux")]
 
+pub mod artifacts;
 pub mod extra;
 pub mod fsops;
 pub mod history;

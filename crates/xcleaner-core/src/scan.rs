@@ -260,6 +260,7 @@ pub fn discover(layout: &Layout) -> Vec<Item> {
     items.extend(crate::extra::flatpak_cache_items(layout));
     items.extend(chromium_items(layout));
     items.extend(crate::extra::dead_launcher_items(layout));
+    items.extend(crate::artifacts::artifact_items(layout));
     let c = covered(&items);
     items.extend(cachedir_tag_items(layout, &c));
     let c = covered(&items);
