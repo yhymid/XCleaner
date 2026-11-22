@@ -1,5 +1,7 @@
 # XCleaner
 
+**English** | [Polski](README.pl.md)
+
 Fast, precise disk cleaner for Linux, written in Rust + GTK4/libadwaita.
 
 XCleaner finds caches, old logs, build artifacts and leftovers of uninstalled apps,
@@ -108,6 +110,7 @@ Release files (Podman or Docker):
 - `crates/xcleaner` – GTK4/libadwaita window and terminal mode.
 - `docs/ROADMAP.md` – plan; `docs/research/` – research notes behind the rules.
 - `CHANGELOG.md` – changes per release.
+- Every document has a Polish version next to it: `X.pl.md`.
 
 ## License
 

@@ -1,104 +1,107 @@
 # Changelog
 
+**English** | [Polski](CHANGELOG.pl.md)
+
 ## Unreleased
 
-### Język / Language
-- Program po angielsku (domyślnie) i po polsku. Przełącznik **EN / PL** jest w pasku okna;
-  wybór zapisuje się w `~/.config/xcleaner/settings.txt`. W terminalu: `--lang en|pl`.
-- Terminal z hasłem i pomocnik roota mówią w języku okna.
-- Rozmiary po angielsku z kropką (`1.5 GiB`), po polsku z przecinkiem (`1,5 GiB`).
+### Language
+- The program is in English (default) and Polish. The **EN / PL** switch is in the window's
+  header bar; the choice is saved in `~/.config/xcleaner/settings.txt`. In a terminal: `--lang en|pl`.
+- The password terminal and the root helper speak the window's language.
+- Sizes in English with a dot (`1.5 GiB`), in Polish with a comma (`1,5 GiB`).
+- Documentation in two languages: `X.md` in English, `X.pl.md` in Polish.
 
 ## 0.2.0 - Open Road
 
-XCleaner wychodzi poza Archa: działa na Ubuntu, Debianie, Mincie, Fedorze, openSUSE
-i pochodnych. Każdy nowy element ma źródło w kodzie lub dokumentacji danego systemu,
-a podejrzane rzeczy są tylko do przejrzenia.
+XCleaner goes beyond Arch: it works on Ubuntu, Debian, Mint, Fedora, openSUSE
+and their derivatives. Every new item has a source in the code or documentation of that system,
+and anything doubtful is review-only.
 
-### Na każdej dystrybucji
-- Paczki `.deb` (Ubuntu 24.04+, Debian 13, Mint 22, Pop!_OS) i `.rpm` (Fedora 41+,
-  openSUSE Tumbleweed) obok AppImage i paczki pacmana. AppImage wymaga teraz glibc 2.39
-  zamiast 2.44, więc działa także poza Archem.
-- Pozostałości po odinstalowanych aplikacjach na Debianie i Ubuntu (`dpkg.log`, także
-  stare spakowane logi, i pakiety „rc”). Na Fedorze i openSUSE historia pakietów nie jest
-  czytelna bez roota, więc program niczego tam nie zgaduje.
-- Terminal do hasła dobierany według pulpitu (Konsole, Ptyxis, GNOME Terminal, xfce4-terminal…),
-  z poprawnymi argumentami każdego. Program wie, kiedy okno zamknięto albo hasło było złe.
-- Hasło przez `sudo`, `doas` albo `su` (Debian z hasłem roota). Nadal bez polkit.
+### On every distribution
+- `.deb` (Ubuntu 24.04+, Debian 13, Mint 22, Pop!_OS) and `.rpm` (Fedora 41+,
+  openSUSE Tumbleweed) packages next to the AppImage and the pacman package. The AppImage now needs
+  glibc 2.39 instead of 2.44, so it also runs outside Arch.
+- Leftovers of uninstalled apps on Debian and Ubuntu (`dpkg.log`, including
+  old compressed logs, and "rc" packages). On Fedora and openSUSE the package history is not
+  readable without root, so the program guesses nothing there.
+- The password terminal is chosen by desktop (Konsole, Ptyxis, GNOME Terminal, xfce4-terminal…),
+  with the right arguments for each. The program knows when the window was closed or the password was wrong.
+- Password through `sudo`, `doas` or `su` (Debian with a root password). Still no polkit.
 
 ### System
-- Cache paczek przez ich własne komendy: `apt-get autoclean` (pełne `apt-get clean` tylko
-  do przejrzenia), `dnf clean packages`, `zypper clean`, `xbps-remove -O`, `apk cache clean`,
+- Package caches through the managers' own commands: `apt-get autoclean` (the full `apt-get clean` is
+  review-only), `dnf clean packages`, `zypper clean`, `xbps-remove -O`, `apk cache clean`,
   `eclean distfiles`.
-- Stare wpisy dziennika systemd (`journalctl --vacuum-time=4weeks`), zrotowane logi
-  w `/var/log` (nigdy aktywne, audit ani historia logowań).
-- Nieużywane runtime’y Flatpak, wyłączone rewizje Snap, `rpm-ostree cleanup`.
-- Raporty awarii apport (Ubuntu) i ABRT (Fedora).
-- Stare kernele — wyłącznie menedżerem pakietów, tylko do przejrzenia; działający zostaje.
-- Moduły po usuniętych kernelach także na Debianie i Fedorze.
-- Na systemach niezmiennych (SteamOS, Silverblue/Bazzite, NixOS, MicroOS) program nie
-  dotyka obrazu systemu.
-- Pacman: puste i porzucone katalogi `download-*` (na nich wywalał się `pacman -Sc`),
-  bazy repozytoriów usuniętych z `pacman.conf`.
-- Każde zadanie czeka, gdy działa menedżer pakietów (apt, dnf, zypper, xbps, apk, pacman).
+- Old systemd journal entries (`journalctl --vacuum-time=4weeks`), rotated logs
+  in `/var/log` (never active ones, audit or login history).
+- Unused Flatpak runtimes, disabled Snap revisions, `rpm-ostree cleanup`.
+- apport (Ubuntu) and ABRT (Fedora) crash reports.
+- Old kernels — only with the package manager, review-only; the running one stays.
+- Modules of removed kernels on Debian and Fedora too.
+- On immutable systems (SteamOS, Silverblue/Bazzite, NixOS, MicroOS) the program does not
+  touch the system image.
+- pacman: empty and abandoned `download-*` directories (`pacman -Sc` used to fail on them),
+  databases of repositories removed from `pacman.conf`.
+- Every task waits while a package manager runs (apt, dnf, zypper, xbps, apk, pacman).
 
-### Katalog domowy
-- Steam z pakietu deb, Flatpaka i Snapa: ochrona danych gier i shadery jak w zwykłej instalacji.
-- Cache aplikacji Snap i dane starych rewizji Snap; Flatpak i Snap są blokowane, gdy aplikacja działa.
-- Kosz: także `directorysizes`.
+### Home directory
+- Steam from the deb package, Flatpak and Snap: game data protection and shaders as in a regular install.
+- Snap app caches and data of old Snap revisions; Flatpak and Snap are blocked while the app runs.
+- Trash: `directorysizes` too.
 
-### Bezpieczeństwo
-- Nigdy z góry: katalogi w `~/.cache`, które trzymają Twoje dane (sesje XFCE, historia schowka,
-  pliki z Bluetooth, słowniki ibus, Local History JetBrains, kopie poczty Evolution, indeks tracker3).
-- Nowe blokady: gwiazdki Nautilusa, metadane GVfs, Akonadi, ulubione KDE, dodatki Cinnamona,
-  poczta lokalna Evolution, `data` i `config` aplikacji Flatpak, profile Firefoksa w Snapie.
-- Programy uruchamiane z AppImage (terminal, menedżer plików, pacman) nie dostają jego
-  bibliotek ani zmiennych.
+### Safety
+- Never preselected: directories in `~/.cache` that hold your data (XFCE sessions, clipboard history,
+  Bluetooth files, ibus dictionaries, JetBrains Local History, Evolution mail copies, tracker3 index).
+- New blocks: Nautilus stars, GVfs metadata, Akonadi, KDE favourites, Cinnamon extensions,
+  Evolution local mail, `data` and `config` of Flatpak apps, Firefox profiles in Snap.
+- Programs started from the AppImage (terminal, file manager, pacman) do not get its
+  libraries or variables.
 
-### Poprawki
-- Historia czyszczeń: każde zadanie systemowe ma osobną linię z prawdziwym zwolnionym miejscem.
+### Fixes
+- Cleaning history: every system task has its own line with the real freed space.
 
 ## 0.1.0 - First Sweep
 
-Pierwsze wydanie. XCleaner szuka śmieci w katalogu domowym i w systemie,
-pokazuje dowód dla każdej pozycji i usuwa tylko to, co zaznaczysz.
+The first release. XCleaner looks for junk in the home directory and in the system,
+shows proof for every item and deletes only what you tick.
 
-### Katalog domowy
-- Pamięć podręczna `~/.cache`. Każdy program jest osobną pozycją. Katalogi z muzyką
-  lub filmami są rozpoznawane i nigdy nie są zaznaczane z góry.
-- Przeglądarki (Chrome, Chromium, Firefox, Zen) i aplikacje Electron (Discord, VSCodium…):
-  tylko cache. Logowanie, wiadomości i ustawienia zostają.
-- Steam: shadery każdej gry osobno z nazwą gry, osierocone shadery po odinstalowanych
-  grach, logi i zrzuty, cache sklepu. Launchery: Prism, Bedrock.
-- Programowanie: yay/paru (bez `vcs.json`), cargo, npm, pnpm, pip/uv, go,
-  artefakty budowania projektów (`target/`, `node_modules`… — ok. 30 typów projektów).
-- Stare wersje Discorda po auto-aktualizacji, martwe skróty w menu, cache Flatpaka.
-- Kosz i lista ostatnio otwieranych plików (zawsze do przejrzenia).
+### Home directory
+- The `~/.cache` cache. Every program is a separate item. Directories with music
+  or videos are recognised and never preselected.
+- Browsers (Chrome, Chromium, Firefox, Zen) and Electron apps (Discord, VSCodium…):
+  cache only. Logins, messages and settings stay.
+- Steam: shaders of every game separately with the game's name, orphaned shaders of uninstalled
+  games, logs and dumps, store cache. Launchers: Prism, Bedrock.
+- Development: yay/paru (without `vcs.json`), cargo, npm, pnpm, pip/uv, go,
+  project build artifacts (`target/`, `node_modules`… — about 30 project types).
+- Old Discord versions after auto-update, dead menu shortcuts, Flatpak cache.
+- Trash and the recently opened files list (always review-only).
 
-### Pozostałości po odinstalowanych aplikacjach
-- Katalogi w `~/.config`, `~/.local/share`, `~/.local/state`, `~/.var/app` po pakietach usuniętych
-  według `pacman.log`. Muszą zgadzać się 3 fakty: nazwa, brak zainstalowanego właściciela
-  i data utworzenia przed usunięciem pakietu.
-- Poziomy „pewne / prawie pewne / możliwe” z uzasadnieniem.
-- Ostrzeżenie, gdy w środku są Twoje dane (profile przeglądarek, zapisy gier, zrzuty ekranu).
+### Leftovers of uninstalled apps
+- Directories in `~/.config`, `~/.local/share`, `~/.local/state`, `~/.var/app` of packages removed
+  according to `pacman.log`. 3 facts must agree: the name, no installed owner
+  and a creation date before the package was removed.
+- "certain / almost certain / possible" tiers with a reason.
+- A warning when your data is inside (browser profiles, game saves, screenshots).
 
-### System (hasło sudo w terminalu)
-- Zrzuty awarii (coredumpy), moduły po usuniętych kernelach (nigdy działającego),
-  cache pacmana: `paccache -rk2`, a pełne czyszczenie tylko na Twoje wyraźne zaznaczenie.
+### System (sudo password in a terminal)
+- Crash dumps (coredumps), modules of removed kernels (never the running one),
+  pacman cache: `paccache -rk2`, and the full clean only when you explicitly tick it.
 
-### Okno
-- Kategorie, rozmiary, szczegóły każdej pozycji, otwieranie w menedżerze plików.
-- „Nie ruszaj tego” (trwała lista wyjątków), dziennik „Zdarzenia” (kopiuj / zapisz .md),
-  historia czyszczeń w `~/.local/state/xcleaner/history.log`.
-- „Co zajmuje miejsce” — przeglądanie rozmiarów katalogów jak w ncdu.
-- Tryb terminalowy: `xcleaner --scan [--details]`, `xcleaner --usage [katalog]`.
+### Window
+- Categories, sizes, details of every item, opening in the file manager.
+- "Keep this" (permanent keep list), "Events" log (copy / save as .md),
+  cleaning history in `~/.local/state/xcleaner/history.log`.
+- "What takes space" — browsing directory sizes like ncdu.
+- Terminal mode: `xcleaner --scan [--details]`, `xcleaner --usage [dir]`.
 
-### Bezpieczeństwo
-- Usuwanie przez deskryptory (bez podążania za symlinkami, bez wychodzenia poza katalog,
-  bez innych systemów plików, bez plików innych użytkowników).
-- Twarda lista „nigdy”: klucze, keyringi, konfiguracja pulpitu, dane gier Steam, `~/.local/bin`…
-- Pozycje działających programów są blokowane.
-- Usunięcie jest trwałe — program mówi to przed każdym czyszczeniem.
+### Safety
+- Deletion through descriptors (no following symlinks, no leaving the directory,
+  no other filesystems, no files of other users).
+- A hard "never" list: keys, keyrings, desktop configuration, Steam game data, `~/.local/bin`…
+- Items of running programs are blocked.
+- Deletion is permanent — the program says so before every clean.
 
-### Wydajność
-- Skan wszystkiego ok. 1 s; „Co zajmuje miejsce” dla całego HOME (440 GB) ok. 3 s.
-- Duże katalogi (np. shadery gier) są usuwane wielowątkowo.
+### Performance
+- Scanning everything takes about 1 s; "What takes space" for the whole HOME (440 GB) about 3 s.
+- Large directories (e.g. game shaders) are deleted with multiple threads.

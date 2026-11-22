@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Print GitHub release notes for the version in Cargo.toml:
-# Download / Install / Launch + the matching CHANGELOG section.
+# Download / Install / Launch + the matching CHANGELOG.md section (English;
+# the Polish changelog is linked).
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ver="$(sed -n 's/^version = "\(.*\)"/\1/p' "$root/Cargo.toml" | head -1)"
@@ -8,16 +9,16 @@ section="$(awk -v v="## $ver - " 'index($0, v) == 1 {on=1; next} /^## / && on {e
 [ -n "$section" ] || { echo "CHANGELOG.md has no '## $ver - <Name>' section" >&2; exit 1; }
 cat <<MD
 ## Download
-| Plik | Dla |
+| File | For |
 |---|---|
-| \`XCleaner-$ver-x86_64.AppImage\` | każda dystrybucja z glibc 2.39+, bez instalacji |
+| \`XCleaner-$ver-x86_64.AppImage\` | any distribution with glibc 2.39+, no installation |
 | \`xcleaner_$ver-1_amd64.deb\` | Ubuntu 24.04+, Debian 13, Linux Mint 22, Pop!_OS |
 | \`xcleaner-$ver-1.x86_64.rpm\` | Fedora 41+, openSUSE Tumbleweed |
 | \`xcleaner-$ver-1-x86_64.pkg.tar.zst\` | Arch, CachyOS, EndeavourOS, Manjaro |
-| \`SHA256SUMS\` | sumy kontrolne wszystkich plików |
+| \`SHA256SUMS\` | checksums of all files |
 
 ## Install
-Najpierw sprawdź pobrane pliki: \`sha256sum -c --ignore-missing SHA256SUMS\`
+Check the downloaded files first: \`sha256sum -c --ignore-missing SHA256SUMS\`
 
 **AppImage**
 \`\`\`sh
@@ -39,16 +40,18 @@ sudo zypper install --allow-unsigned-rpm ./xcleaner-$ver-1.x86_64.rpm
 \`\`\`sh
 sudo pacman -U xcleaner-$ver-1-x86_64.pkg.tar.zst
 \`\`\`
-Wymaga: GTK 4.10+, libadwaita 1.5+ (paczki dociągną je same; AppImage ma je w środku),
-emulatora terminala oraz \`sudo\`, \`doas\` albo \`su\` do czyszczenia systemu.
-Nie działa na Debianie 12 i Ubuntu 22.04 (za stara glibc i GTK).
+Needs GTK 4.10+, libadwaita 1.5+ (the packages pull them in; the AppImage bundles them),
+a terminal emulator and \`sudo\`, \`doas\` or \`su\` for system cleaning.
+Does not run on Debian 12 or Ubuntu 22.04 (glibc and GTK too old).
 
 ## Launch
 \`\`\`sh
-xcleaner                            # albo z menu: XCleaner (AppImage: ./XCleaner-$ver-x86_64.AppImage)
-xcleaner --scan --details           # raport w terminalu, nic nie usuwa
+xcleaner                            # or from the menu: XCleaner (AppImage: ./XCleaner-$ver-x86_64.AppImage)
+xcleaner --scan --details           # report in the terminal, deletes nothing
 \`\`\`
-Uruchamiaj **bez sudo**. Hasło jest potrzebne tylko przy czyszczeniu systemu —
-program otworzy wtedy terminal.
+Run it **without sudo**. The password is needed only for system cleaning —
+the program then opens a terminal.
 $section
+
+Po polsku: [CHANGELOG.pl.md](https://github.com/yhymid/XCleaner/blob/v$ver/CHANGELOG.pl.md)
 MD
