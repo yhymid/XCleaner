@@ -372,8 +372,14 @@ fn root_found() -> Vec<Found> {
                 ),
                 RootTask::PacmanDownloads => (
                     "root:pacman-downloads",
-                    "Puste katalogi po przerwanych pobraniach pacmana",
-                    format!("/var/cache/pacman/pkg/download-* ({}). Pacman zostawia je po przerwanej aktualizacji; usuwane są tylko puste.", p.detail),
+                    "Katalogi po przerwanych pobraniach pacmana",
+                    format!("/var/cache/pacman/pkg/download-* ({}). Pacman zostawia je po przerwanej aktualizacji, a `pacman -Sc` potrafi się na nich wywalić. Usuwane: puste, albo starsze niż doba i zawierające same porzucone pliki.", p.detail),
+                    Regen::Never,
+                ),
+                RootTask::UnusedSyncDbs => (
+                    "root:unused-sync-dbs",
+                    "Bazy repozytoriów usuniętych z pacman.conf",
+                    format!("/var/lib/pacman/sync: {} — to samo co część `pacman -Sc`.", p.detail),
                     Regen::Never,
                 ),
                 RootTask::KernelModules => (
@@ -398,7 +404,10 @@ fn root_found() -> Vec<Found> {
                     targets: vec![(PathBuf::from(p.task.arg()), Action::Root(p.task))],
                     guards: if matches!(
                         p.task,
-                        RootTask::PacmanCache | RootTask::PacmanCacheAll | RootTask::PacmanDownloads
+                        RootTask::PacmanCache
+                            | RootTask::PacmanCacheAll
+                            | RootTask::PacmanDownloads
+                            | RootTask::UnusedSyncDbs
                     ) {
                         vec!["pacman".into(), "yay".into(), "paru".into()]
                     } else {

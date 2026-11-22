@@ -28,6 +28,7 @@ const MODULES_DIR: &str = "/usr/lib/modules";
 const PACCACHE: &str = "/usr/bin/paccache";
 const PKG_DIR: &str = "/var/cache/pacman/pkg";
 const PACMAN_LOCK: &str = "/var/lib/pacman/db.lck";
+const SYNC_DIR: &str = "/var/lib/pacman/sync";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum RootTask {
@@ -39,17 +40,20 @@ pub enum RootTask {
     PacmanCacheAll,
     /// /usr/lib/modules/<ver> of kernels no longer installed.
     KernelModules,
-    /// Empty `download-XXXXXX` dirs pacman 7 leaves after interrupted downloads.
+    /// `download-XXXXXX` dirs pacman 7 leaves after interrupted downloads.
     PacmanDownloads,
+    /// Sync databases of repositories no longer in pacman.conf (`pacman -Sc`).
+    UnusedSyncDbs,
 }
 
 impl RootTask {
-    pub const ALL: [RootTask; 5] = [
+    pub const ALL: [RootTask; 6] = [
         RootTask::Coredumps,
         RootTask::PacmanCache,
         RootTask::PacmanCacheAll,
         RootTask::KernelModules,
         RootTask::PacmanDownloads,
+        RootTask::UnusedSyncDbs,
     ];
 
     /// Where the task works (for display).
@@ -58,6 +62,7 @@ impl RootTask {
             RootTask::Coredumps => COREDUMP_DIR,
             RootTask::PacmanCache | RootTask::PacmanCacheAll | RootTask::PacmanDownloads => PKG_DIR,
             RootTask::KernelModules => MODULES_DIR,
+            RootTask::UnusedSyncDbs => SYNC_DIR,
         }
     }
 
@@ -68,6 +73,7 @@ impl RootTask {
             RootTask::PacmanCacheAll => "pacman-cache-all",
             RootTask::KernelModules => "kernel-modules",
             RootTask::PacmanDownloads => "pacman-downloads",
+            RootTask::UnusedSyncDbs => "unused-sync-dbs",
         }
     }
 
@@ -174,6 +180,40 @@ fn parse_paccache(out: &str) -> (u64, u64) {
     (0, 0)
 }
 
+/// Package file names a dry run lists with `-v`.
+fn paccache_list(args: &[&str]) -> Vec<String> {
+    let Ok(out) = Command::new(PACCACHE)
+        .arg("-v")
+        .args(args)
+        .env("LC_ALL", "C")
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output()
+    else {
+        return Vec::new();
+    };
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .map(str::trim)
+        .filter(|l| l.contains(".pkg.tar") && !l.ends_with(".sig"))
+        .map(|l| l.rsplit('/').next().unwrap_or(l).to_string())
+        .collect()
+}
+
+fn package_names(files: &[String], max: usize) -> String {
+    let mut names: Vec<&str> = files
+        .iter()
+        .map(|f| f.split(".pkg.tar").next().unwrap_or(f))
+        .collect();
+    names.sort();
+    let more = names.len().saturating_sub(max);
+    let mut s = names.into_iter().take(max).collect::<Vec<_>>().join(", ");
+    if more > 0 {
+        s.push_str(&format!(" … i {more} więcej"));
+    }
+    s
+}
+
 fn paccache_dry(args: &[&str]) -> (u64, u64) {
     let Ok(out) = Command::new(PACCACHE)
         .args(args)
@@ -196,7 +236,10 @@ fn probe_pacman_cache_all() -> Option<Probe> {
         task: RootTask::PacmanCacheAll,
         bytes,
         files: n,
-        detail: format!("{n} paczek"),
+        detail: format!(
+            "{n} paczek: {}",
+            package_names(&paccache_list(&["-d", "-k0"]), 8)
+        ),
     })
 }
 
@@ -211,11 +254,16 @@ fn probe_pacman_cache() -> Option<Probe> {
         task: RootTask::PacmanCache,
         bytes,
         files: n1 + n2,
-        detail: format!(
-            "{} starszych wersji, {} po odinstalowanych pakietach",
-            crate::format_size(old),
-            crate::format_size(removed)
-        ),
+        detail: {
+            let mut files = paccache_list(&["-d", "-k2"]);
+            files.extend(paccache_list(&["-d", "-uk0"]));
+            format!(
+                "{} starszych wersji, {} po odinstalowanych pakietach: {}",
+                crate::format_size(old),
+                crate::format_size(removed),
+                package_names(&files, 8)
+            )
+        },
     })
 }
 
@@ -338,6 +386,7 @@ fn root_pacman_downloads() -> (u64, Vec<String>) {
     say("• Puste katalogi po przerwanych pobraniach pacmana…");
     let dirs = stale_download_dirs();
     let mut removed = 0;
+    let mut freed = 0;
     let mut errs = Vec::new();
     for d in &dirs {
         let Ok(c) = std::ffi::CString::new(format!("{PKG_DIR}/{d}")) else {
@@ -346,15 +395,140 @@ fn root_pacman_downloads() -> (u64, Vec<String>) {
         // rmdir(2) removes only an empty directory and never follows a symlink.
         if unsafe { libc::rmdir(c.as_ptr()) } == 0 {
             removed += 1;
-        } else {
-            let e = io::Error::last_os_error();
-            if e.raw_os_error() != Some(libc::ENOTEMPTY) {
-                errs.push(format!("{d}: {e}"));
+            continue;
+        }
+        let e = io::Error::last_os_error();
+        if e.raw_os_error() != Some(libc::ENOTEMPTY) {
+            errs.push(format!("{d}: {e}"));
+            continue;
+        }
+        // Not empty: abandoned partial downloads. pacman -Sc itself fails on
+        // such a dir ("Error reading fd"). Only a day-old dir that holds
+        // nothing but regular files is emptied.
+        match empty_abandoned_download(&Path::new(PKG_DIR).join(d)) {
+            Ok(Some(b)) => {
+                freed += b;
+                if unsafe { libc::rmdir(c.as_ptr()) } == 0 {
+                    removed += 1;
+                } else {
+                    errs.push(format!("{d}: {}", io::Error::last_os_error()));
+                }
             }
+            Ok(None) => say(&format!("  {d}: pominięto (świeży albo nie tylko pliki)")),
+            Err(e) => errs.push(format!("{d}: {e}")),
         }
     }
-    say(&format!("  usunięto {removed} z {} katalogów", dirs.len()));
-    (0, errs)
+    say(&format!(
+        "  usunięto {removed} z {} katalogów, zwolniono {}",
+        dirs.len(),
+        crate::format_size(freed)
+    ));
+    (freed, errs)
+}
+
+/// Delete the files of an abandoned download dir. `Ok(None)` (nothing
+/// touched) unless it is older than a day and holds only regular files.
+fn empty_abandoned_download(dir: &Path) -> io::Result<Option<u64>> {
+    let m = fs::symlink_metadata(dir)?;
+    let day_ago = std::time::SystemTime::now() - Duration::from_secs(86_400);
+    if !m.is_dir() || m.modified()? > day_ago {
+        return Ok(None);
+    }
+    let mut files = Vec::new();
+    for e in fs::read_dir(dir)? {
+        let e = e?;
+        let fm = fs::symlink_metadata(e.path())?;
+        if !fm.is_file() {
+            return Ok(None);
+        }
+        files.push((e.path(), fm.blocks() * 512));
+    }
+    let mut freed = 0;
+    for (p, b) in files {
+        fs::remove_file(&p)?;
+        freed += b;
+    }
+    Ok(Some(freed))
+}
+
+// ------------------------------------------------- unused sync databases
+
+/// `extra.db`, `extra.files.sig` → `extra`.
+fn sync_db_repo(file: &str) -> Option<&str> {
+    let base = file.strip_suffix(".sig").unwrap_or(file);
+    base.strip_suffix(".db")
+        .or_else(|| base.strip_suffix(".files"))
+}
+
+fn configured_repos() -> Option<std::collections::HashSet<String>> {
+    let out = Command::new("/usr/bin/pacman-conf")
+        .arg("--repo-list")
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let set: std::collections::HashSet<String> = String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .map(str::to_string)
+        .collect();
+    // An empty list means a broken config: never treat everything as unused.
+    (!set.is_empty()).then_some(set)
+}
+
+fn unused_sync_dbs() -> Vec<(String, u64)> {
+    let Some(repos) = configured_repos() else {
+        return Vec::new();
+    };
+    let Ok(rd) = fs::read_dir(SYNC_DIR) else {
+        return Vec::new();
+    };
+    let mut v: Vec<(String, u64)> = rd
+        .flatten()
+        .filter_map(|e| {
+            let name = e.file_name().into_string().ok()?;
+            let m = fs::symlink_metadata(e.path()).ok()?;
+            let repo = sync_db_repo(&name)?;
+            (m.is_file() && !repos.contains(repo)).then(|| (name.clone(), m.blocks() * 512))
+        })
+        .collect();
+    v.sort();
+    v
+}
+
+fn probe_unused_sync_dbs() -> Option<Probe> {
+    let v = unused_sync_dbs();
+    (!v.is_empty()).then(|| Probe {
+        task: RootTask::UnusedSyncDbs,
+        bytes: v.iter().map(|(_, b)| b).sum(),
+        files: v.len() as u64,
+        detail: v
+            .iter()
+            .map(|(n, _)| n.as_str())
+            .collect::<Vec<_>>()
+            .join(", "),
+    })
+}
+
+fn root_unused_sync_dbs() -> (u64, Vec<String>) {
+    say("• Bazy repozytoriów usuniętych z pacman.conf…");
+    if Path::new(PACMAN_LOCK).exists() {
+        return (0, vec!["pacman działa (db.lck) — pominięto".into()]);
+    }
+    let mut freed = 0;
+    let mut errs = Vec::new();
+    for (name, b) in unused_sync_dbs() {
+        say(&format!("  {SYNC_DIR}/{name}"));
+        match fs::remove_file(Path::new(SYNC_DIR).join(&name)) {
+            Ok(()) => freed += b,
+            Err(e) => errs.push(format!("{name}: {e}")),
+        }
+    }
+    (freed, errs)
 }
 
 /// Read-only look at everything phase 2 could clean.
@@ -365,6 +539,7 @@ pub fn probe_all() -> Vec<Probe> {
         probe_pacman_cache_all(),
         probe_modules(),
         probe_pacman_downloads(),
+        probe_unused_sync_dbs(),
     ]
     .into_iter()
     .flatten()
@@ -459,6 +634,7 @@ pub fn run_root(args: &[String]) -> i32 {
             RootTask::PacmanCacheAll => root_paccache(&[&["-r", "-k0"]]),
             RootTask::KernelModules => root_modules(),
             RootTask::PacmanDownloads => root_pacman_downloads(),
+            RootTask::UnusedSyncDbs => root_unused_sync_dbs(),
         };
         report.line("freed", t, &freed.to_string());
         for e in &errs {
@@ -499,6 +675,9 @@ fn root_coredumps() -> (u64, Vec<String>) {
 fn root_paccache(runs: &[&[&str]]) -> (u64, Vec<String>) {
     let mut freed = 0;
     let mut errs = Vec::new();
+    if Path::new(PACMAN_LOCK).exists() {
+        return (0, vec!["pacman działa (db.lck) — pominięto".into()]);
+    }
     for args in runs {
         say(&format!("• Cache pacmana: paccache {}…", args.join(" ")));
         match Command::new(PACCACHE)
@@ -799,6 +978,30 @@ mod tests {
         let a = terminal_args(Path::new("/usr/bin/alacritty"), "sudo", &["x".into()]);
         assert_eq!(a[2], "-e");
         assert_eq!(a[3], "sudo");
+    }
+
+    #[test]
+    fn sync_db_names_and_package_list() {
+        assert_eq!(sync_db_repo("extra.db"), Some("extra"));
+        assert_eq!(sync_db_repo("cachyos-v3.files.sig"), Some("cachyos-v3"));
+        assert_eq!(sync_db_repo("README"), None);
+        let files = vec![
+            "b-1-1-x86_64.pkg.tar.zst".to_string(),
+            "a-2-1-any.pkg.tar.zst".to_string(),
+        ];
+        assert_eq!(package_names(&files, 1), "a-2-1-any … i 1 więcej");
+    }
+
+    #[test]
+    fn abandoned_download_needs_old_dir_with_files_only() {
+        let d = std::env::temp_dir().join(format!("xc-dl-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&d);
+        fs::create_dir_all(&d).unwrap();
+        fs::write(d.join("x.pkg.tar.zst.part"), b"x").unwrap();
+        // Fresh dir: untouched.
+        assert_eq!(empty_abandoned_download(&d).unwrap(), None);
+        assert!(d.join("x.pkg.tar.zst.part").exists());
+        fs::remove_dir_all(&d).unwrap();
     }
 
     #[test]
