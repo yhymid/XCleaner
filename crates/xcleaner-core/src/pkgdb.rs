@@ -1,8 +1,9 @@
 //! Package databases as evidence for leftovers: what is installed (names,
 //! provides, file identities) and when packages were removed. Chosen by
 //! which database files exist, not by distro name; several may coexist.
-//! Formats: docs/research/DISTRO-PACKAGES-2026-11.md. Only pacman is
-//! verified on real data; dpkg and zypper are checked in VMs (v0.3.0).
+//! Formats: docs/research/DISTRO-PACKAGES-2026-11.md. Verified on real
+//! data: pacman (the Deck), dpkg (Debian 13 and Ubuntu 24.04 containers:
+//! install, config dir, removal → an Exact leftover).
 //! A database without a removal log (dnf history is SQLite, xbps, apk,
 //! Nix) contributes installed identities only, so nothing there is ever
 //! called a leftover.
@@ -320,7 +321,10 @@ fn rpm() -> Option<PkgSystem> {
             sys.identities.extend(path_identities(l));
         }
     }
-    // zypper keeps a text history; dnf's is SQLite (not read yet).
+    // zypper keeps a text history, but /var/log/zypp is 0750 root (checked
+    // in an openSUSE Tumbleweed container), so a user usually cannot read
+    // it; dnf's history is SQLite (not read yet). Both are installed-only
+    // then, and no leftover is offered.
     if let Ok(h) = fs::read_to_string(ZYPP_HISTORY) {
         sys.events = parse_zypp_history(&h, local_offset());
     }
