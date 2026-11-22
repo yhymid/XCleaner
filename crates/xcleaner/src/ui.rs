@@ -73,6 +73,9 @@ fn build(app: &adw::Application) {
     let scan_button = gtk::Button::with_label("Skanuj");
     scan_button.add_css_class("suggested-action");
     header.pack_start(&scan_button);
+    let usage_button = gtk::Button::from_icon_name("drive-harddisk-symbolic");
+    usage_button.set_tooltip_text(Some("Co zajmuje miejsce"));
+    header.pack_end(&usage_button);
     let events_button = gtk::Button::from_icon_name("document-open-recent-symbolic");
     events_button.set_tooltip_text(Some("Zdarzenia"));
     header.pack_end(&events_button);
@@ -126,6 +129,8 @@ fn build(app: &adw::Application) {
     let s = state.clone();
     events_button.connect_clicked(move |_| show_events(&s));
     let s = state.clone();
+    usage_button.connect_clicked(move |_| show_usage(&s));
+    let s = state.clone();
     restore_button.connect_clicked(move |_| match KeepList::clear() {
         Ok(()) => {
             event(&s, "Wyczyszczono listę ukrytych pozycji");
@@ -140,6 +145,12 @@ fn build(app: &adw::Application) {
     clean_button.connect_clicked(move |_| confirm_clean(&s));
     window.present();
     start_scan(&state);
+    // QA hook: open a view directly (used for screenshots in development).
+    match std::env::var("XCLEANER_OPEN").as_deref() {
+        Ok("usage") => show_usage(&state),
+        Ok("events") => show_events(&state),
+        _ => {}
+    }
 }
 
 fn status_page(icon: &str, title: &str, desc: &str) -> adw::StatusPage {
@@ -600,4 +611,163 @@ fn show_events(state: &Rc<State>) {
         });
     });
     dialog.present(Some(&state.window));
+}
+
+struct UsageView {
+    home: std::path::PathBuf,
+    view: adw::ToolbarView,
+    title: adw::WindowTitle,
+    back: gtk::Button,
+    path: RefCell<Vec<std::path::PathBuf>>,
+    window: adw::ApplicationWindow,
+}
+
+fn show_usage(state: &Rc<State>) {
+    let header = adw::HeaderBar::new();
+    let back = gtk::Button::from_icon_name("go-previous-symbolic");
+    back.set_tooltip_text(Some("Wróć"));
+    header.pack_start(&back);
+    let title = adw::WindowTitle::new("Co zajmuje miejsce", "~");
+    header.set_title_widget(Some(&title));
+    let view = adw::ToolbarView::new();
+    view.add_top_bar(&header);
+    let dialog = adw::Dialog::builder()
+        .title("Co zajmuje miejsce")
+        .content_width(720)
+        .content_height(640)
+        .child(&view)
+        .build();
+    let uv = Rc::new(UsageView {
+        home: state.layout.home.clone(),
+        view,
+        title,
+        back: back.clone(),
+        path: RefCell::new(vec![std::path::PathBuf::new()]),
+        window: state.window.clone(),
+    });
+    let u = uv.clone();
+    back.connect_clicked(move |_| {
+        let target = {
+            let mut p = u.path.borrow_mut();
+            if p.len() > 1 {
+                p.pop();
+            }
+            p.last().cloned().unwrap_or_default()
+        };
+        load_usage(&u, target);
+    });
+    load_usage(&uv, std::path::PathBuf::new());
+    event(state, "Otwarto „Co zajmuje miejsce”");
+    dialog.present(Some(&state.window));
+}
+
+fn load_usage(uv: &Rc<UsageView>, rel: std::path::PathBuf) {
+    uv.back.set_sensitive(uv.path.borrow().len() > 1);
+    uv.title.set_subtitle(&format!("~/{}", rel.display()));
+    uv.view.set_content(Some(&busy_page("Liczenie rozmiarów…")));
+    let (home, r) = (uv.home.clone(), rel.clone());
+    let handle = gtk::gio::spawn_blocking(move || xcleaner_core::usage::breakdown(&home, &r));
+    let uv = uv.clone();
+    glib::spawn_future_local(async move {
+        let b = match handle.await {
+            Ok(Ok(b)) => b,
+            Ok(Err(e)) => {
+                uv.view.set_content(Some(&status_page(
+                    "dialog-error-symbolic",
+                    "Nie można odczytać",
+                    &e.to_string(),
+                )));
+                return;
+            }
+            Err(_) => return,
+        };
+        let page = adw::PreferencesPage::new();
+        let group = adw::PreferencesGroup::builder()
+            .title(glib::markup_escape_text(&format!("~/{}", b.rel.display())).as_str())
+            .description(format!(
+                "{} · {} · {} ms",
+                format_size(b.total),
+                pl(b.entries.len() as u64, "pozycja", "pozycje", "pozycji"),
+                b.elapsed.as_millis()
+            ))
+            .build();
+        for e in b.entries.iter().take(300) {
+            let mut subtitle = format!(
+                "{} · {}",
+                pl(e.usage.files, "plik", "pliki", "plików"),
+                pl(
+                    e.usage.dirs.saturating_sub(e.is_dir as u64),
+                    "katalog",
+                    "katalogi",
+                    "katalogów"
+                )
+            );
+            if e.is_symlink {
+                subtitle = "dowiązanie (nie jest liczone)".into();
+            }
+            if let Some(n) = &e.note {
+                subtitle.push_str(&format!(" · {n}"));
+            }
+            let row = adw::ActionRow::builder()
+                .title(
+                    glib::markup_escape_text(&format!(
+                        "{}{}",
+                        e.name,
+                        if e.is_dir { "/" } else { "" }
+                    ))
+                    .as_str(),
+                )
+                .subtitle(glib::markup_escape_text(&subtitle).as_str())
+                .build();
+            let bar = gtk::LevelBar::for_interval(0.0, 1.0);
+            bar.set_value(if b.total > 0 {
+                e.usage.bytes as f64 / b.total as f64
+            } else {
+                0.0
+            });
+            bar.set_size_request(90, -1);
+            bar.set_valign(gtk::Align::Center);
+            // Plain proportion, not a warning meter.
+            bar.remove_offset_value(Some(gtk::LEVEL_BAR_OFFSET_LOW));
+            bar.remove_offset_value(Some(gtk::LEVEL_BAR_OFFSET_HIGH));
+            bar.remove_offset_value(Some(gtk::LEVEL_BAR_OFFSET_FULL));
+            row.add_prefix(&bar);
+            let size = gtk::Label::new(Some(&format_size(e.usage.bytes)));
+            size.add_css_class("numeric");
+            row.add_suffix(&size);
+            let open = gtk::Button::from_icon_name("folder-open-symbolic");
+            open.set_valign(gtk::Align::Center);
+            open.add_css_class("flat");
+            open.set_tooltip_text(Some("Otwórz w menedżerze plików"));
+            let abs = uv.home.join(&e.rel);
+            let win = uv.window.clone();
+            open.connect_clicked(move |_| {
+                let target = if abs.is_dir() {
+                    abs.clone()
+                } else {
+                    abs.parent()
+                        .map(|p| p.to_path_buf())
+                        .unwrap_or_else(|| abs.clone())
+                };
+                gtk::FileLauncher::new(Some(&gtk::gio::File::for_path(&target))).launch(
+                    Some(&win),
+                    None::<&gtk::gio::Cancellable>,
+                    |_| {},
+                );
+            });
+            row.add_suffix(&open);
+            if e.is_dir && !e.is_symlink {
+                row.add_suffix(&gtk::Image::from_icon_name("go-next-symbolic"));
+                row.set_activatable(true);
+                let (u, r) = (uv.clone(), e.rel.clone());
+                row.connect_activated(move |_| {
+                    u.path.borrow_mut().push(r.clone());
+                    load_usage(&u, r.clone());
+                });
+            }
+            group.add(&row);
+        }
+        page.add(&group);
+        uv.view.set_content(Some(&page));
+    });
 }

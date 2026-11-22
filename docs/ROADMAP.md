@@ -72,13 +72,19 @@ maszyny, a UPSTREAM-CLEANERS opisuje BleachBit, czkawka, kondo, CCleaner i inne.
 - [x] Flatpak: `~/.var/app/<id>/cache` zainstalowanych aplikacji.
 - [x] Resztki „możliwe” (pierwszy człon nazwy); AppImage’y liczone jako zainstalowane.
 
-## v0.0.5 — duże
-- [ ] Artefakty budowania projektów w stylu kondo/npkill:
-  - `target/` (CACHEDIR.TAG), `node_modules`, `.venv`, `build/`;
-  - filtr wieku („nieużywane od 30 dni”);
-  - wyszukiwanie w `~/Projects`, `~/Pobrane` i katalogach wskazanych przez użytkownika.
-- [ ] Reguły w osadzonym TOML (`include_str!`) zamiast w kodzie Rust.
-- [ ] Widok „co zajmuje miejsce” (jak ncdu) dla całego `$HOME`: równoległy skan.
+## v0.0.5 — duże (zrobione)
+- [x] Artefakty budowania projektów (`artifacts.rs`), w stylu npkill:
+  - katalog jest artefaktem tylko obok pliku projektu (Cargo.toml→target,
+    package.json→node_modules, CMake `build` tylko z CMakeCache.txt, ok. 30 typów);
+  - szukanie w całym HOME bez ukrytych katalogów, symlinków i innych systemów plików;
+  - zaznaczone, jeśli projekt nie był budowany od 30 dni. Na tej maszynie: 12 GB w 4 projektach.
+- [x] „Co zajmuje miejsce” (ikona dysku, `xcleaner --usage [katalog]`):
+  - wchodzenie w głąb, paski udziału, otwieranie w menedżerze plików;
+  - całe HOME (442 GB) w 3,0 s, `du` ok. 3,7 s.
+- [x] Poprawka: pomiar zawieszał się na kolejkach FIFO (`~/.steam/steam.pipe`).
+- [x] Poprawka: `| head` w CLI nie robi już panic ani coredumpa.
+- [ ] Przeniesione: reguły w osadzonym TOML. Wymaga nowej zależności (`toml`);
+  zrobić razem z regułami użytkownika.
 
 ## v0.1.0 — wydanie
 - [ ] AppImage (linuxdeploy + plugin GTK, jak w XUninstaller).
