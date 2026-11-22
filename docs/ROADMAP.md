@@ -1,5 +1,21 @@
 # XCleaner — roadmapa
 
+## Plan wersji (decyzja właściciela 2026-11-22)
+- **v0.1.0 — First Sweep:** działa na sprzęcie właściciela (Steam Deck OLED, CachyOS,
+  Hyprland): HOME + system przez sudo w terminalu. Release: AppImage i paczka pacmana.
+- **v0.2.0:** wszystkie dystrybucje, w tym menedżery pakietów apt, dnf, zypper i flatpak/snap,
+  inne pulpity i układy katalogów. Research przez agentów jest obowiązkowy, bo nie da się
+  tego zweryfikować na jednej maszynie.
+- **v0.3.0:** testy w maszynach wirtualnych: Debian, Fedora, Arch i popularne dystrybucje
+  z https://distrowatch.com/.
+- **v0.4.0:** do ustalenia później razem z agentami.
+
+Każda wersja v0.X.0 trafia do GitHub Release:
+- tytuł `<wersja> - <Nazwa> Update`;
+- sekcje Download / Install / Launch;
+- changelog z `CHANGELOG.md`;
+- pliki: AppImage + `.sha256` i paczka `.pkg.tar.zst`. AUR (yay) dojdzie, gdy repo będzie publiczne.
+
 Zadania są ułożone od najmniejszych do największych. Każdy etap kończy się
 działającym buildem, który można przetestować na Decku.
 
@@ -86,21 +102,25 @@ maszyny, a UPSTREAM-CLEANERS opisuje BleachBit, czkawka, kondo, CCleaner i inne.
 - [ ] Przeniesione: reguły w osadzonym TOML. Wymaga nowej zależności (`toml`);
   zrobić razem z regułami użytkownika.
 
-## v0.1.0 — wydanie
+## v0.1.0 — First Sweep (wydanie)
 - [x] AppImage: `packaging/build-appimage.sh`.
   - linuxdeploy z przypiętym SHA-256 i plugin GTK z przypiętym commitem, jak w XU.
   - 48 MB; przetestowany na Decku (CLI i okno, Wayland).
 - [x] Ikona SVG i plik .desktop (PL/EN).
-- [ ] README PL/EN dla użytkownika, testy na świeżym Arch/CachyOS, wydanie (decyzja właściciela).
+- [x] Paczka pacmana: `packaging/arch/PKGBUILD` + `packaging/build-pkg.sh` (484 KB).
+- [x] Faza 2 w v0.1.0 (decyzja właściciela): coredumpy, `paccache`, moduły starych kerneli,
+  przez `sudo` w terminalu (bez polkit, jak XU).
+- [ ] Test właściciela na Decku: prawdziwe czyszczenie z okna, łącznie z hasłem sudo.
+- [ ] Testy na świeżym Arch/CachyOS przechodzą do v0.3.0.
 
-## Faza 2 — system (`/`, przez sudo)
-- [ ] Broker roota z XUninstaller: GUI nigdy nie działa jako root; dozwolona jest tylko
-  zatwierdzona lista komend.
-- [ ] Cache pacmana przez `paccache -rk2`. Nie `-rk0`, bo to blokuje downgrade.
+## Faza 2 — system (`/`, przez sudo): część weszła do v0.1.0
+- [x] `root.rs`: sudo w terminalu. Root dostaje tylko nazwy zadań i sam wylicza cele.
+  GUI nigdy nie działa jako root.
+- [x] Cache pacmana: `paccache -rk2` + `-ruk0`. `-rk0` jest osobną pozycją, nigdy zaznaczoną z góry.
+- [x] Coredumpy i moduły po usuniętych kernelach.
 - [ ] journald: `--vacuum-time`, nigdy „usuń wszystko”. Tylko zrotowane logi w `/var/log`.
-- [ ] Coredumpy (`/var/lib/systemd/coredump`, research: 1–4 GB, głównie CS2).
-- [ ] Moduły po usuniętych kernelach, `/var/tmp`, nieużywane runtime’y Flatpak
-  (`flatpak uninstall --unused`).
+- [ ] Na v0.2.0: `/var/tmp`, nieużywane runtime’y Flatpak (`flatpak uninstall --unused`),
+  journald według czasu, zrotowane logi w `/var/log`, coredumpy z innych dystrybucji.
 
 ## Nigdy
 - Wymazywanie RAM, swapu i wolnego miejsca, „shred”.
