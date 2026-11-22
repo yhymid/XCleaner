@@ -255,13 +255,6 @@ fn show_results(state: &Rc<State>, res: scan::ScanResult) {
     }
     *state.rows.borrow_mut() = rows;
     state.content.set_content(Some(&page));
-    // Focus lands on a checkbox somewhere in the list; start at the top
-    // once the page has been laid out.
-    state.scan_button.grab_focus();
-    let p = page.clone();
-    glib::timeout_add_local_once(std::time::Duration::from_millis(50), move || {
-        p.scroll_to_top()
-    });
     update_summary(state);
     state.toasts.add_toast(adw::Toast::new(&format!(
         "Znaleziono {} w {} ms",
