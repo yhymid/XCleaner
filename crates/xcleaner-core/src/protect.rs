@@ -31,6 +31,22 @@ const NEVER_INSIDE: &[&str] = &[
     ".wine",
     ".minecraft",
     ".local/share/PrismLauncher/instances",
+    // Desktop user data that looks like cache but is not
+    // (docs/research/DISTRO-DESKTOPS-TERMINALS-2026-11.md).
+    ".local/share/gvfs-metadata", // emblems, custom icons, folder view settings
+    ".local/share/nautilus",      // Starred files
+    ".local/share/akonadi",       // KMail / KOrganizer database
+    ".local/share/kactivitymanagerd", // activity history and Kickoff favourites
+    ".local/share/cinnamon",      // installed applets, desklets, extensions
+    ".local/share/evolution",     // local mail (POP, "On This Computer")
+    ".local/share/gnome-shell/application_state",
+    ".config/xfce4",
+    ".config/cosmic",
+    // Flatpak and Snap app data / config (`*` = one path component).
+    ".var/app/*/data",
+    ".var/app/*/config",
+    "snap/*/common/.mozilla",
+    "snap/*/common/.thunderbird",
 ];
 
 /// Paths that are containers: allowed below a deeper rule, never as a target itself.
@@ -48,7 +64,29 @@ const NEVER_EXACT: &[&str] = &[
     ".cargo",
     ".npm",
     ".rustup",
+    // Not `.var/app/*` or `.var/app/*/cache`: those are legitimate targets
+    // (leftovers of uninstalled Flatpaks, Flatpak cache).
+    "snap",
+    "snap/*",
+    "snap/*/common",
+    "snap/*/current",
 ];
+
+/// Component-wise prefix match; `*` matches exactly one component.
+fn pattern_prefix(rel: &Path, pat: &str) -> bool {
+    let mut r = rel.components();
+    for p in Path::new(pat).components() {
+        match r.next() {
+            Some(c) if p.as_os_str() == "*" || c == p => {}
+            _ => return false,
+        }
+    }
+    true
+}
+
+fn pattern_exact(rel: &Path, pat: &str) -> bool {
+    rel.components().count() == Path::new(pat).components().count() && pattern_prefix(rel, pat)
+}
 
 /// Why a target is refused, or None when it may be cleaned.
 pub fn refusal(rel: &Path) -> Option<&'static str> {
@@ -60,10 +98,10 @@ pub fn refusal(rel: &Path) -> Option<&'static str> {
     if comps.len() < 2 {
         return Some("katalog najwyższego poziomu w HOME");
     }
-    if NEVER_EXACT.iter().any(|p| rel == Path::new(p)) {
+    if NEVER_EXACT.iter().any(|p| pattern_exact(rel, p)) {
         return Some("katalog zbiorczy");
     }
-    if NEVER_INSIDE.iter().any(|p| rel.starts_with(p)) {
+    if NEVER_INSIDE.iter().any(|p| pattern_prefix(rel, p)) {
         return Some("chroniona lokalizacja (klucze, konfiguracja, dane gier)");
     }
     None
@@ -86,6 +124,12 @@ mod tests {
             "Obrazy",
             ".local/bin/steam",
             ".config/hypr/hyprland.lua",
+            ".local/share/gvfs-metadata/home",
+            ".local/share/nautilus/tags",
+            ".var/app/org.gimp.GIMP/config/GIMP",
+            ".var/app/org.gimp.GIMP/data",
+            "snap/firefox",
+            "snap/firefox/common/.mozilla/firefox",
         ] {
             assert!(refusal(Path::new(p)).is_some(), "{p}");
         }
@@ -98,6 +142,11 @@ mod tests {
             ".config/discordcanary/Cache",
             ".local/share/Steam/steamapps/shadercache/730",
             ".local/share/Steam/logs",
+            ".var/app/org.gimp.GIMP/cache/gimp",
+            ".var/app/org.gimp.GIMP/cache",
+            ".var/app/org.gimp.GIMP",
+            "snap/firefox/common/.cache/mozilla",
+            ".local/share/nautilusx",
         ] {
             assert_eq!(refusal(Path::new(p)), None, "{p}");
         }
