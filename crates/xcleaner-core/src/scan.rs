@@ -20,6 +20,8 @@ pub struct Layout {
     cache: Option<PathBuf>,
     config: Option<PathBuf>,
     data: Option<PathBuf>,
+    /// Every Steam installation in HOME (relative, deduplicated).
+    pub steam_roots: Vec<PathBuf>,
 }
 
 fn xdg_rel(home: &Path, var: &str, default: &str) -> Option<PathBuf> {
@@ -43,12 +45,21 @@ impl Layout {
     }
 
     pub fn with_home(home: PathBuf) -> Self {
+        let data = xdg_rel(&home, "XDG_DATA_HOME", ".local/share");
         Self {
             cache: xdg_rel(&home, "XDG_CACHE_HOME", ".cache"),
             config: xdg_rel(&home, "XDG_CONFIG_HOME", ".config"),
-            data: xdg_rel(&home, "XDG_DATA_HOME", ".local/share"),
+            steam_roots: crate::extra::steam_roots(&home, data.as_deref()),
+            data,
             home,
         }
+    }
+
+    /// Why `rel` may not be cleaned: the static deny-list plus the
+    /// protected parts of every Steam installation.
+    pub fn refusal(&self, rel: &Path) -> Option<&'static str> {
+        crate::protect::refusal(rel)
+            .or_else(|| crate::protect::steam_refusal(&self.steam_roots, rel))
     }
 
     pub fn base(&self, base: Base) -> Option<PathBuf> {
@@ -279,8 +290,7 @@ pub fn discover(layout: &Layout) -> Vec<Item> {
     items.extend(leftovers);
     // Hard deny-list: drop any target a rule should never have produced.
     for it in &mut items {
-        it.targets
-            .retain(|(p, _)| crate::protect::refusal(p).is_none());
+        it.targets.retain(|(p, _)| layout.refusal(p).is_none());
     }
     items.retain(|i| !i.targets.is_empty());
     items
@@ -524,7 +534,7 @@ pub fn clean(layout: &Layout, items: &[Item]) -> std::io::Result<CleanReport> {
                 root_tasks.push((*t, item.id.clone()));
                 continue;
             }
-            if let Some(why) = crate::protect::refusal(rel) {
+            if let Some(why) = layout.refusal(rel) {
                 rep.errors
                     .push(format!("{}: odmowa — {why}", rel.display()));
                 continue;
@@ -651,6 +661,7 @@ mod tests {
             cache: Some(".cache".into()),
             config: Some(".config".into()),
             data: Some(".local/share".into()),
+            steam_roots: Vec::new(),
             home: home.clone(),
         };
         let items = discover(&layout);

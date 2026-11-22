@@ -88,6 +88,34 @@ fn pattern_exact(rel: &Path, pat: &str) -> bool {
     rel.components().count() == Path::new(pat).components().count() && pattern_prefix(rel, pat)
 }
 
+/// Parts of a Steam installation that are never deleted, relative to its root.
+const STEAM_NEVER_INSIDE: &[&str] = &[
+    "userdata",
+    "config",
+    "steamapps/common",
+    "steamapps/compatdata",
+    "steamapps/workshop",
+];
+
+/// Containers inside a Steam installation: never a target themselves.
+const STEAM_NEVER_EXACT: &[&str] = &["", "steamapps", "steamapps/shadercache"];
+
+/// Refusal for paths inside any of the given Steam roots (relative to HOME).
+pub fn steam_refusal(roots: &[std::path::PathBuf], rel: &Path) -> Option<&'static str> {
+    for root in roots {
+        let Ok(sub) = rel.strip_prefix(root) else {
+            continue;
+        };
+        if STEAM_NEVER_EXACT.iter().any(|p| sub == Path::new(p)) {
+            return Some("katalog zbiorczy Steam");
+        }
+        if STEAM_NEVER_INSIDE.iter().any(|p| sub.starts_with(p)) {
+            return Some("chroniona lokalizacja (klucze, konfiguracja, dane gier)");
+        }
+    }
+    None
+}
+
 /// Why a target is refused, or None when it may be cleaned.
 pub fn refusal(rel: &Path) -> Option<&'static str> {
     let comps: Vec<_> = rel.components().collect();
@@ -132,6 +160,30 @@ mod tests {
             "snap/firefox/common/.mozilla/firefox",
         ] {
             assert!(refusal(Path::new(p)).is_some(), "{p}");
+        }
+    }
+
+    #[test]
+    fn steam_protection_follows_every_root() {
+        let roots = vec![
+            std::path::PathBuf::from(".steam/debian-installation"),
+            std::path::PathBuf::from(".var/app/com.valvesoftware.Steam/.local/share/Steam"),
+        ];
+        for p in [
+            ".steam/debian-installation",
+            ".steam/debian-installation/userdata/1/config",
+            ".steam/debian-installation/steamapps/compatdata/730",
+            ".var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps/common/Game",
+            ".var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps",
+        ] {
+            assert!(steam_refusal(&roots, Path::new(p)).is_some(), "{p}");
+        }
+        for p in [
+            ".steam/debian-installation/steamapps/shadercache/730",
+            ".steam/debian-installation/logs",
+            ".steam/other/userdata",
+        ] {
+            assert_eq!(steam_refusal(&roots, Path::new(p)), None, "{p}");
         }
     }
 

@@ -8,6 +8,7 @@ use crate::{
 use std::{
     collections::HashMap,
     fs,
+    os::unix::fs::MetadataExt,
     path::{Path, PathBuf},
 };
 
@@ -67,15 +68,86 @@ fn steam_id(name: &str) -> Option<u32> {
         .or_else(|| name.parse::<i32>().ok().map(|v| v as u32))
 }
 
-pub fn steam_items(layout: &Layout) -> Vec<Item> {
-    let Some(data) = layout.base(crate::rules::Base::Data) else {
+/// Every Steam installation in HOME, relative to it: native, Debian/Ubuntu
+/// package, Flathub and Snap. Symlinks (`~/.steam/root`) are resolved but
+/// must stay inside HOME; duplicates are dropped by (dev, inode); a root
+/// counts only with a `steamapps` directory.
+pub fn steam_roots(home: &Path, data: Option<&Path>) -> Vec<PathBuf> {
+    let Ok(home_real) = fs::canonicalize(home) else {
         return Vec::new();
     };
-    let root = data.join("Steam");
-    let abs = layout.home.join(&root);
-    if !is_real_dir(&abs) {
-        return Vec::new();
+    let mut cands: Vec<PathBuf> = Vec::new();
+    if let Some(d) = data {
+        cands.push(d.join("Steam"));
     }
+    for c in [
+        ".local/share/Steam",
+        ".steam/debian-installation",
+        ".steam/steam",
+        ".steam/root",
+        ".var/app/com.valvesoftware.Steam/.local/share/Steam",
+        ".var/app/com.valvesoftware.Steam/data/Steam",
+        ".var/app/com.valvesoftware.Steam/.steam/root",
+        "snap/steam/common/.local/share/Steam",
+    ] {
+        cands.push(PathBuf::from(c));
+    }
+    let mut seen = std::collections::HashSet::new();
+    let mut out = Vec::new();
+    for c in cands {
+        let Ok(real) = fs::canonicalize(home.join(&c)) else {
+            continue;
+        };
+        let Ok(rel) = real.strip_prefix(&home_real) else {
+            continue;
+        };
+        let Ok(meta) = fs::metadata(&real) else {
+            continue;
+        };
+        if !meta.is_dir() || !is_real_dir(&real.join("steamapps")) {
+            continue;
+        }
+        if seen.insert((meta.dev(), meta.ino())) {
+            out.push(rel.to_path_buf());
+        }
+    }
+    out
+}
+
+/// Label shown after item names for non-native installations.
+fn steam_flavour(root: &Path) -> &'static str {
+    let s = root.to_string_lossy();
+    if s.starts_with(".var/app/") {
+        " (Flatpak)"
+    } else if s.starts_with("snap/") {
+        " (Snap)"
+    } else if s.contains("debian-installation") {
+        " (pakiet deb)"
+    } else {
+        ""
+    }
+}
+
+pub fn steam_items(layout: &Layout) -> Vec<Item> {
+    let mut items = Vec::new();
+    for (i, root) in layout.steam_roots.iter().enumerate() {
+        // The first root keeps the old ids, so keep.txt entries stay valid.
+        let tag = if i == 0 {
+            String::new()
+        } else {
+            format!("{}:", root.display())
+        };
+        items.extend(steam_root_items(layout, root, &tag, steam_flavour(root)));
+    }
+    items
+}
+
+fn steam_root_items(layout: &Layout, root: &Path, tag: &str, flavour: &str) -> Vec<Item> {
+    // "" for the first root, ":<root>" for the others.
+    let suffix = tag
+        .strip_suffix(':')
+        .map(|t| format!(":{t}"))
+        .unwrap_or_default();
     let apps = root.join("steamapps");
     let mut names: HashMap<u32, String> = HashMap::new();
     for f in sorted_names(&layout.home.join(&apps)) {
@@ -106,8 +178,8 @@ pub fn steam_items(layout: &Layout) -> Vec<Item> {
         let installed = names.contains_key(&id);
         let mut it = match names.get(&id) {
             Some(game) => item(
-                format!("steam-shader:{d}"),
-                format!("Shadery Steam: {game}"),
+                format!("steam-shader:{tag}{d}"),
+                format!("Shadery Steam{flavour}: {game}"),
                 "Skompilowane shadery gry. Po usunięciu gra przycina, dopóki się nie odbudują."
                     .into(),
                 Category::Games,
@@ -115,8 +187,8 @@ pub fn steam_items(layout: &Layout) -> Vec<Item> {
                 Regen::Slow,
             ),
             None if id < 0x8000_0000 => item(
-                format!("steam-shader:{d}"),
-                format!("Shadery po odinstalowanej grze ({id})"),
+                format!("steam-shader:{tag}{d}"),
+                format!("Shadery po odinstalowanej grze{flavour} ({id})"),
                 "Gra nie jest już zainstalowana, a jej shadery zostały na dysku.".into(),
                 Category::Games,
                 Risk::Safe,
@@ -135,8 +207,8 @@ pub fn steam_items(layout: &Layout) -> Vec<Item> {
         items.push(it);
     }
     let mut logs = item(
-        "steam-logs".into(),
-        "Steam — logi i zrzuty awarii".into(),
+        format!("steam-logs{suffix}"),
+        format!("Steam{flavour} — logi i zrzuty awarii"),
         "Pliki dziennika i zrzuty awarii klienta Steam.".into(),
         Category::Games,
         Risk::Safe,
@@ -147,8 +219,8 @@ pub fn steam_items(layout: &Layout) -> Vec<Item> {
     }
     items.push(logs);
     let mut http = item(
-        "steam-httpcache".into(),
-        "Steam — cache sklepu i obrazków".into(),
+        format!("steam-httpcache{suffix}"),
+        format!("Steam{flavour} — cache sklepu i obrazków"),
         "Pobrane strony sklepu i grafiki biblioteki.".into(),
         Category::Games,
         Risk::Safe,
@@ -484,6 +556,32 @@ pub fn dead_launcher_items(layout: &Layout) -> Vec<Item> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn steam_roots_are_found_once_each() {
+        let home = std::env::temp_dir().join(format!("xc-steam-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&home);
+        let native = home.join(".local/share/Steam/steamapps");
+        let flat = home.join(".var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps");
+        fs::create_dir_all(&native).unwrap();
+        fs::create_dir_all(&flat).unwrap();
+        // Not a Steam root: no steamapps.
+        fs::create_dir_all(home.join(".steam/debian-installation")).unwrap();
+        // ~/.steam/root -> native: same root, listed once.
+        std::os::unix::fs::symlink(home.join(".local/share/Steam"), home.join(".steam/root"))
+            .unwrap();
+        // A symlink leaving HOME is ignored.
+        std::os::unix::fs::symlink("/usr", home.join(".steam/steam")).unwrap();
+        let roots = steam_roots(&home, Some(Path::new(".local/share")));
+        assert_eq!(
+            roots,
+            vec![
+                PathBuf::from(".local/share/Steam"),
+                PathBuf::from(".var/app/com.valvesoftware.Steam/.local/share/Steam"),
+            ]
+        );
+        fs::remove_dir_all(&home).unwrap();
+    }
 
     #[test]
     fn stateful_cache_dirs_are_never_preselected() {
