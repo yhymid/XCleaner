@@ -19,9 +19,16 @@ fn main() -> std::process::ExitCode {
             println!("XCleaner {}", env!("CARGO_PKG_VERSION"));
             std::process::ExitCode::SUCCESS
         }
-        Some("--scan") => cli_scan(args.iter().any(|a| a == "--details")),
+        Some("--usage") | Some("--scan") => {
+            xcleaner_core::default_sigpipe();
+            if first == Some("--usage") {
+                cli_usage(args.iter().skip_while(|a| *a != "--usage").nth(1))
+            } else {
+                cli_scan(args.iter().any(|a| a == "--details"))
+            }
+        }
         Some("--help") | Some("-h") => {
-            println!("XCleaner {}\n\n  xcleaner          okno programu\n  xcleaner --scan [--details]   raport w terminalu (nic nie usuwa)\n  --no-files-db                 bez `pacman -Fl` (stare wykrywanie resztek)", env!("CARGO_PKG_VERSION"));
+            println!("XCleaner {}\n\n  xcleaner          okno programu\n  xcleaner --scan [--details]   raport w terminalu (nic nie usuwa)\n  xcleaner --usage [katalog]    co zajmuje miejsce w HOME (tylko odczyt)\n  --no-files-db                 bez `pacman -Fl` (stare wykrywanie resztek)", env!("CARGO_PKG_VERSION"));
             std::process::ExitCode::SUCCESS
         }
         _ => {
@@ -32,6 +39,41 @@ fn main() -> std::process::ExitCode {
                 return std::process::ExitCode::FAILURE;
             }
             ui::run()
+        }
+    }
+}
+
+fn cli_usage(sub: Option<&String>) -> std::process::ExitCode {
+    let Some(layout) = scan::Layout::from_env() else {
+        return std::process::ExitCode::FAILURE;
+    };
+    let rel = std::path::PathBuf::from(sub.map(String::as_str).unwrap_or(""));
+    match xcleaner_core::usage::breakdown(&layout.home, &rel) {
+        Ok(b) => {
+            for e in b.entries.iter().take(25) {
+                let note = e
+                    .note
+                    .as_deref()
+                    .map(|n| format!("  ({n})"))
+                    .unwrap_or_default();
+                println!(
+                    "{:>10}  {}{}{note}",
+                    format_size(e.usage.bytes),
+                    e.name,
+                    if e.is_dir { "/" } else { "" }
+                );
+            }
+            println!(
+                "\nRazem ~/{}: {} · {} ms",
+                b.rel.display(),
+                format_size(b.total),
+                b.elapsed.as_millis()
+            );
+            std::process::ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("Błąd: {e}");
+            std::process::ExitCode::FAILURE
         }
     }
 }

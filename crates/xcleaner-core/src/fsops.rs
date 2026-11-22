@@ -227,7 +227,9 @@ impl Home {
 
     /// Size of a file or directory tree. `Ok(None)` when it does not exist.
     pub fn measure(&self, rel: &Path) -> io::Result<Option<Usage>> {
-        let fd = match self.open_target(rel, libc::O_RDONLY | libc::O_NOFOLLOW) {
+        // O_PATH opens nothing: a FIFO (e.g. ~/.steam/steam.pipe) or a device
+        // would block or react to a real open(2).
+        let fd = match self.open_target(rel, libc::O_PATH | libc::O_NOFOLLOW) {
             Ok(fd) => fd,
             Err(e) if e.raw_os_error() == Some(libc::ENOENT) => return Ok(None),
             Err(e) => return Err(e),
@@ -235,8 +237,14 @@ impl Home {
         let st = fstat(fd.as_raw_fd())?;
         let mut usage = Usage::default();
         if is_dir(&st) {
+            let dir =
+                self.open_target(rel, libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW)?;
+            let dst = fstat(dir.as_raw_fd())?;
+            if dst.st_ino != st.st_ino || dst.st_dev != st.st_dev {
+                return Err(io::Error::other("directory changed during measuring"));
+            }
             let mut seen = HashSet::new();
-            measure_dir(fd.as_raw_fd(), st.st_dev, 0, &mut seen, &mut usage);
+            measure_dir(dir.as_raw_fd(), st.st_dev, 0, &mut seen, &mut usage);
         } else {
             usage.bytes = st.st_blocks as u64 * 512;
             usage.files = 1;
@@ -605,6 +613,20 @@ mod tests {
             .unwrap()
             .unwrap();
         assert!(u.mostly_media(), "{u:?}");
+        fs::remove_dir_all(&home).unwrap();
+    }
+
+    #[test]
+    fn measuring_a_fifo_does_not_block() {
+        let home = tmp("fifo");
+        fs::create_dir_all(home.join(".steam")).unwrap();
+        let p = CString::new(home.join(".steam/steam.pipe").as_os_str().as_bytes()).unwrap();
+        assert_eq!(unsafe { libc::mkfifo(p.as_ptr(), 0o600) }, 0);
+        let h = Home::open(&home).unwrap();
+        let u = h.measure(Path::new(".steam/steam.pipe")).unwrap().unwrap();
+        assert_eq!(u.files, 1);
+        let d = h.measure(Path::new(".steam")).unwrap().unwrap();
+        assert_eq!(d.files, 1);
         fs::remove_dir_all(&home).unwrap();
     }
 

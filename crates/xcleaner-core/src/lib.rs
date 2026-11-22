@@ -11,11 +11,21 @@ pub mod procs;
 pub mod protect;
 pub mod rules;
 pub mod scan;
+pub mod usage;
 
 /// True when running with effective UID 0.
 pub fn is_root() -> bool {
     // SAFETY: geteuid has no preconditions.
     unsafe { libc::geteuid() == 0 }
+}
+
+/// CLI output piped into `head` etc.: exit quietly on a closed pipe like
+/// coreutils, instead of a panic (and, with panic=abort, a core dump).
+pub fn default_sigpipe() {
+    // SAFETY: resetting a signal disposition has no preconditions.
+    unsafe {
+        libc::signal(libc::SIGPIPE, libc::SIG_DFL);
+    }
 }
 
 /// Human-readable size with binary units (e.g. "1,5 GiB" in Polish style).

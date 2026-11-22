@@ -315,7 +315,7 @@ fn blocked_reason(item: &Item, procs: &Processes, home: &Path) -> Option<String>
 }
 
 /// Run `f` over `items` on all CPUs, preserving order.
-fn parallel_map<T: Sync, R: Send>(items: &[T], f: impl Fn(&T) -> R + Sync) -> Vec<R> {
+pub(crate) fn parallel_map<T: Sync, R: Send>(items: &[T], f: impl Fn(&T) -> R + Sync) -> Vec<R> {
     let n = std::thread::available_parallelism()
         .map(|n| n.get())
         .unwrap_or(4)
