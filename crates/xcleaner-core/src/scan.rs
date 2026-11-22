@@ -411,6 +411,18 @@ fn root_found() -> Vec<Found> {
                     format!("flatpak uninstall --unused: {}. Żadna zainstalowana aplikacja ich nie używa; rozmiar przybliżony.", p.detail),
                     Regen::Never,
                 ),
+                RootTask::PkgCache => (
+                    "root:pkg-cache",
+                    "Cache menedżera pakietów",
+                    format!("{} — przez własną komendę menedżera (apt-get autoclean, dnf clean packages, zypper clean…). Paczki da się pobrać ponownie.", p.detail),
+                    Regen::Never,
+                ),
+                RootTask::AptClean => (
+                    "root:apt-clean",
+                    "Cache apt — wszystkie pobrane paczki",
+                    format!("apt-get clean ({}): usuwa wszystkie pobrane .deb. Bez internetu nie da się ich wtedy przeinstalować z cache.", p.detail),
+                    Regen::Slow,
+                ),
                 RootTask::KernelModules => (
                     "root:kernel-modules",
                     "Moduły po usuniętych kernelach",
@@ -424,7 +436,7 @@ fn root_found() -> Vec<Found> {
                     name: name.into(),
                     description: desc,
                     category: Category::SystemRoot,
-                    risk: if p.task == RootTask::PacmanCacheAll {
+                    risk: if matches!(p.task, RootTask::PacmanCacheAll | RootTask::AptClean) {
                         Risk::Review
                     } else {
                         Risk::Safe

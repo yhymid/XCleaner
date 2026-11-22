@@ -8,6 +8,7 @@ pub mod history;
 pub mod keep;
 pub mod leftovers;
 pub mod locks;
+pub mod pkgcache;
 pub mod procs;
 pub mod protect;
 pub mod root;

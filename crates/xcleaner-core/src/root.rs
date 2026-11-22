@@ -49,10 +49,14 @@ pub enum RootTask {
     RotatedLogs,
     /// `flatpak uninstall --unused --system`.
     FlatpakUnused,
+    /// Cache of apt / dnf / zypper / xbps / apk / eclean (their own clean).
+    PkgCache,
+    /// `apt-get clean`: every downloaded .deb (opt-in only).
+    AptClean,
 }
 
 impl RootTask {
-    pub const ALL: [RootTask; 9] = [
+    pub const ALL: [RootTask; 11] = [
         RootTask::Coredumps,
         RootTask::PacmanCache,
         RootTask::PacmanCacheAll,
@@ -62,6 +66,8 @@ impl RootTask {
         RootTask::JournalVacuum,
         RootTask::RotatedLogs,
         RootTask::FlatpakUnused,
+        RootTask::PkgCache,
+        RootTask::AptClean,
     ];
 
     /// Where the task works (for display).
@@ -74,6 +80,8 @@ impl RootTask {
             RootTask::JournalVacuum => "/var/log/journal",
             RootTask::RotatedLogs => "/var/log",
             RootTask::FlatpakUnused => "/var/lib/flatpak",
+            RootTask::PkgCache => "/var/cache",
+            RootTask::AptClean => "/var/cache/apt/archives",
         }
     }
 
@@ -88,6 +96,8 @@ impl RootTask {
             RootTask::JournalVacuum => "journal-vacuum",
             RootTask::RotatedLogs => "rotated-logs",
             RootTask::FlatpakUnused => "flatpak-unused",
+            RootTask::PkgCache => "pkg-cache",
+            RootTask::AptClean => "apt-clean",
         }
     }
 
@@ -704,6 +714,8 @@ pub fn run_root(args: &[String]) -> i32 {
             RootTask::JournalVacuum => crate::sysclean::root_journal(),
             RootTask::RotatedLogs => crate::sysclean::root_rotated_logs(),
             RootTask::FlatpakUnused => crate::sysclean::root_flatpak_unused(),
+            RootTask::PkgCache => crate::pkgcache::root_clean(),
+            RootTask::AptClean => crate::pkgcache::root_apt_clean(),
         };
         report.line("freed", t, &freed.to_string());
         for e in &errs {
