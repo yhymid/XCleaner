@@ -27,7 +27,6 @@ const COREDUMP_DIR: &str = "/var/lib/systemd/coredump";
 const MODULES_DIR: &str = "/usr/lib/modules";
 const PACCACHE: &str = "/usr/bin/paccache";
 const PKG_DIR: &str = "/var/cache/pacman/pkg";
-const PACMAN_LOCK: &str = "/var/lib/pacman/db.lck";
 const SYNC_DIR: &str = "/var/lib/pacman/sync";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -352,7 +351,7 @@ fn is_download_dir_name(name: &str) -> bool {
 /// Stale download dirs: right name, real directory, untouched for an hour,
 /// and pacman not running. Emptiness is enforced by rmdir itself.
 fn stale_download_dirs() -> Vec<String> {
-    if Path::new(PACMAN_LOCK).exists() {
+    if crate::locks::busy_package_manager().is_some() {
         return Vec::new();
     }
     let hour_ago = std::time::SystemTime::now() - Duration::from_secs(3600);
@@ -516,8 +515,11 @@ fn probe_unused_sync_dbs() -> Option<Probe> {
 
 fn root_unused_sync_dbs() -> (u64, Vec<String>) {
     say("• Bazy repozytoriów usuniętych z pacman.conf…");
-    if Path::new(PACMAN_LOCK).exists() {
-        return (0, vec!["pacman działa (db.lck) — pominięto".into()]);
+    if let Some(pm) = crate::locks::busy_package_manager() {
+        return (
+            0,
+            vec![format!("działa menedżer pakietów: {pm} — pominięto")],
+        );
     }
     let mut freed = 0;
     let mut errs = Vec::new();
@@ -709,8 +711,11 @@ fn root_coredumps() -> (u64, Vec<String>) {
 fn root_paccache(runs: &[&[&str]]) -> (u64, Vec<String>) {
     let mut freed = 0;
     let mut errs = Vec::new();
-    if Path::new(PACMAN_LOCK).exists() {
-        return (0, vec!["pacman działa (db.lck) — pominięto".into()]);
+    if let Some(pm) = crate::locks::busy_package_manager() {
+        return (
+            0,
+            vec![format!("działa menedżer pakietów: {pm} — pominięto")],
+        );
     }
     for args in runs {
         say(&format!("• Cache pacmana: paccache {}…", args.join(" ")));
