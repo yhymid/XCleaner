@@ -41,3 +41,7 @@ pokazuje dowód dla każdej pozycji i usuwa tylko to, co zaznaczysz.
 - Twarda lista „nigdy”: klucze, keyringi, konfiguracja pulpitu, dane gier Steam, `~/.local/bin`…
 - Pozycje działających programów są blokowane.
 - Usunięcie jest trwałe — program mówi to przed każdym czyszczeniem.
+
+### Wydajność
+- Skan wszystkiego ok. 1 s; „Co zajmuje miejsce” dla całego HOME (440 GB) ok. 3 s.
+- Duże katalogi (np. shadery gier) są usuwane wielowątkowo.

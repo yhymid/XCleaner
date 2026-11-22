@@ -276,7 +276,7 @@ impl Home {
             ));
         }
         let mut rep = DeleteReport::default();
-        clear_contents(fd.as_raw_fd(), st.st_dev, self.uid, 0, keep, &mut rep);
+        clear_contents_parallel(fd.as_raw_fd(), st.st_dev, self.uid, keep, &mut rep);
         Ok(rep)
     }
 
@@ -323,7 +323,7 @@ impl Home {
             ));
         }
         let mut rep = DeleteReport::default();
-        if clear_contents(child.as_raw_fd(), st.st_dev, self.uid, 0, &[], &mut rep) {
+        if clear_contents_parallel(child.as_raw_fd(), st.st_dev, self.uid, &[], &mut rep) {
             drop(child);
             unlink(pfd, &cname, true)?;
             rep.freed.bytes += st.st_blocks as u64 * 512;
@@ -420,6 +420,101 @@ fn measure_dir(
 }
 
 /// Remove the contents of `dirfd`. Returns true when the directory is now empty.
+fn name_err(rep: &mut DeleteReport, name: &CStr, e: io::Error) {
+    rep.errors.push(format!(
+        "{}: {e}",
+        OsStr::from_bytes(name.to_bytes()).to_string_lossy()
+    ));
+}
+
+/// Remove one entry of `dirfd` (a whole subtree for a directory).
+/// Returns true when it is gone.
+fn remove_entry(
+    dirfd: i32,
+    name: &CStr,
+    dev: u64,
+    uid: u32,
+    depth: usize,
+    rep: &mut DeleteReport,
+) -> bool {
+    let st = match fstatat(dirfd, name) {
+        Ok(st) => st,
+        Err(e) if e.raw_os_error() == Some(libc::ENOENT) => return true,
+        Err(e) => {
+            name_err(rep, name, e);
+            return false;
+        }
+    };
+    if st.st_uid != uid || st.st_dev != dev {
+        rep.skipped += 1;
+        return false;
+    }
+    if !is_dir(&st) {
+        return match unlink(dirfd, name, false) {
+            Ok(()) => {
+                // A hard-linked file only frees space with its last link.
+                if st.st_nlink <= 1 {
+                    rep.freed.bytes += st.st_blocks as u64 * 512;
+                }
+                rep.freed.files += 1;
+                true
+            }
+            Err(e) if e.raw_os_error() == Some(libc::ENOENT) => true,
+            Err(e) => {
+                name_err(rep, name, e);
+                false
+            }
+        };
+    }
+    let Some(child) = open_verified_child(dirfd, name, &st, rep) else {
+        return false;
+    };
+    if !clear_contents(child.as_raw_fd(), dev, uid, depth + 1, &[], rep) {
+        return false;
+    }
+    drop(child);
+    finish_dir(dirfd, name, &st, rep)
+}
+
+/// Open a subdirectory and check it is the one `st` describes.
+fn open_verified_child(
+    dirfd: i32,
+    name: &CStr,
+    st: &libc::stat,
+    rep: &mut DeleteReport,
+) -> Option<OwnedFd> {
+    let child = match open_child_dir(dirfd, name) {
+        Ok(c) => c,
+        Err(e) => {
+            name_err(rep, name, e);
+            return None;
+        }
+    };
+    match fstat(child.as_raw_fd()) {
+        Ok(c) if c.st_ino == st.st_ino && c.st_dev == st.st_dev => Some(child),
+        _ => {
+            rep.skipped += 1;
+            None
+        }
+    }
+}
+
+/// rmdir an emptied directory and account for it.
+fn finish_dir(dirfd: i32, name: &CStr, st: &libc::stat, rep: &mut DeleteReport) -> bool {
+    match unlink(dirfd, name, true) {
+        Ok(()) => {
+            rep.freed.bytes += st.st_blocks as u64 * 512;
+            rep.freed.dirs += 1;
+            true
+        }
+        Err(e) => {
+            name_err(rep, name, e);
+            false
+        }
+    }
+}
+
+/// Remove the contents of `dirfd`. Returns true when the directory is now empty.
 fn clear_contents(
     dirfd: i32,
     dev: u64,
@@ -445,80 +540,106 @@ fn clear_contents(
             empty = false;
             continue;
         }
+        if !remove_entry(dirfd, &name, dev, uid, depth, rep) {
+            empty = false;
+        }
+    }
+    empty
+}
+
+/// Like [`clear_contents`] at the top of a target, but the work below the
+/// first two levels is spread over all CPUs. Deleting a shader cache with
+/// hundreds of thousands of files was the slowest part of a real clean.
+fn clear_contents_parallel(
+    dirfd: i32,
+    dev: u64,
+    uid: u32,
+    keep: &[&str],
+    rep: &mut DeleteReport,
+) -> bool {
+    let names = match read_names(dirfd) {
+        Ok(n) => n,
+        Err(e) => {
+            rep.errors.push(format!("readdir: {e}"));
+            return false;
+        }
+    };
+    let mut empty = true;
+    // Level 1: files go at once, directories are opened and verified.
+    let mut subdirs: Vec<(CString, OwnedFd, libc::stat)> = Vec::new();
+    for name in names {
+        if keep.iter().any(|k| k.as_bytes() == name.to_bytes()) {
+            empty = false;
+            continue;
+        }
         let st = match fstatat(dirfd, &name) {
             Ok(st) => st,
             Err(e) if e.raw_os_error() == Some(libc::ENOENT) => continue,
             Err(e) => {
-                rep.errors.push(format!(
-                    "{}: {e}",
-                    OsStr::from_bytes(name.to_bytes()).to_string_lossy()
-                ));
+                name_err(rep, &name, e);
                 empty = false;
                 continue;
             }
         };
-        if st.st_uid != uid || st.st_dev != dev {
-            rep.skipped += 1;
+        if is_dir(&st) && st.st_uid == uid && st.st_dev == dev {
+            match open_verified_child(dirfd, &name, &st, rep) {
+                Some(child) => subdirs.push((name, child, st)),
+                None => empty = false,
+            }
+        } else if !remove_entry(dirfd, &name, dev, uid, 0, rep) {
             empty = false;
-            continue;
         }
-        if is_dir(&st) {
-            let child = match open_child_dir(dirfd, &name) {
-                Ok(c) => c,
-                Err(e) => {
-                    rep.errors.push(format!(
-                        "{}: {e}",
-                        OsStr::from_bytes(name.to_bytes()).to_string_lossy()
-                    ));
-                    empty = false;
-                    continue;
-                }
-            };
-            // The opened directory must be the one we just inspected.
-            match fstat(child.as_raw_fd()) {
-                Ok(c) if c.st_ino == st.st_ino && c.st_dev == st.st_dev => {}
-                _ => {
-                    rep.skipped += 1;
-                    empty = false;
-                    continue;
-                }
+    }
+    // Level 2 entries are the parallel jobs.
+    let mut failed = vec![false; subdirs.len()];
+    let mut jobs: Vec<(usize, CString)> = Vec::new();
+    for (i, (_, child, _)) in subdirs.iter().enumerate() {
+        match read_names(child.as_raw_fd()) {
+            Ok(n) => jobs.extend(n.into_iter().map(|g| (i, g))),
+            Err(e) => {
+                rep.errors.push(format!("readdir: {e}"));
+                failed[i] = true;
             }
-            if !clear_contents(child.as_raw_fd(), dev, uid, depth + 1, &[], rep) {
-                empty = false;
-                continue;
-            }
-            drop(child);
-            match unlink(dirfd, &name, true) {
-                Ok(()) => {
-                    rep.freed.bytes += st.st_blocks as u64 * 512;
-                    rep.freed.dirs += 1;
-                }
-                Err(e) => {
-                    rep.errors.push(format!(
-                        "{}: {e}",
-                        OsStr::from_bytes(name.to_bytes()).to_string_lossy()
-                    ));
-                    empty = false;
-                }
-            }
-        } else {
-            match unlink(dirfd, &name, false) {
-                Ok(()) => {
-                    // A hard-linked file only frees space with its last link.
-                    if st.st_nlink <= 1 {
-                        rep.freed.bytes += st.st_blocks as u64 * 512;
+        }
+    }
+    let fds: Vec<i32> = subdirs.iter().map(|(_, c, _)| c.as_raw_fd()).collect();
+    let threads = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(4)
+        .min(jobs.len().max(1));
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let results: Vec<(DeleteReport, Vec<usize>)> = std::thread::scope(|sc| {
+        let handles: Vec<_> = (0..threads)
+            .map(|_| {
+                sc.spawn(|| {
+                    let mut lrep = DeleteReport::default();
+                    let mut lfail = Vec::new();
+                    loop {
+                        let j = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        let Some((i, g)) = jobs.get(j) else { break };
+                        if !remove_entry(fds[*i], g, dev, uid, 1, &mut lrep) {
+                            lfail.push(*i);
+                        }
                     }
-                    rep.freed.files += 1;
-                }
-                Err(e) if e.raw_os_error() == Some(libc::ENOENT) => {}
-                Err(e) => {
-                    rep.errors.push(format!(
-                        "{}: {e}",
-                        OsStr::from_bytes(name.to_bytes()).to_string_lossy()
-                    ));
-                    empty = false;
-                }
-            }
+                    (lrep, lfail)
+                })
+            })
+            .collect();
+        handles.into_iter().filter_map(|h| h.join().ok()).collect()
+    });
+    for (lrep, lfail) in results {
+        rep.freed.add(lrep.freed);
+        rep.skipped += lrep.skipped;
+        rep.errors.extend(lrep.errors);
+        for i in lfail {
+            failed[i] = true;
+        }
+    }
+    drop(fds);
+    for (i, (name, child, st)) in subdirs.into_iter().enumerate() {
+        drop(child);
+        if failed[i] || !finish_dir(dirfd, &name, &st, rep) {
+            empty = false;
         }
     }
     empty
@@ -660,5 +781,55 @@ mod tests {
         assert_eq!(rep.freed.files, 1);
         assert!(!home.join(".local/share/recently-used.xbel").exists());
         fs::remove_dir_all(&home).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod bench {
+    use super::*;
+
+    fn build(root: &Path) {
+        for a in 0..4 {
+            for b in 0..150 {
+                let d = root.join(format!("cache/{a}/{b}"));
+                std::fs::create_dir_all(&d).unwrap();
+                for c in 0..200 {
+                    std::fs::write(d.join(format!("f{c}")), b"0123456789").unwrap();
+                }
+            }
+        }
+    }
+
+    /// `XCLEANER_BENCH_DIR=<dir on the real disk> cargo test --release -p xcleaner-core bench -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn sequential_vs_parallel_delete() {
+        let base = std::path::PathBuf::from(
+            std::env::var("XCLEANER_BENCH_DIR").expect("XCLEANER_BENCH_DIR"),
+        );
+        for (label, par) in [("1 wątek", false), ("równolegle", true)] {
+            let root = base.join(format!("bench-{par}"));
+            let _ = std::fs::remove_dir_all(&root);
+            build(&root);
+            let h = Home::open(&root).unwrap();
+            let fd = h
+                .open_target(Path::new("cache"), libc::O_RDONLY | libc::O_DIRECTORY)
+                .unwrap();
+            let st = fstat(fd.as_raw_fd()).unwrap();
+            let mut rep = DeleteReport::default();
+            let t = std::time::Instant::now();
+            let ok = if par {
+                clear_contents_parallel(fd.as_raw_fd(), st.st_dev, h.uid, &[], &mut rep)
+            } else {
+                clear_contents(fd.as_raw_fd(), st.st_dev, h.uid, 0, &[], &mut rep)
+            };
+            println!(
+                "{label}: {} plików w {:?} (ok={ok})",
+                rep.freed.files,
+                t.elapsed()
+            );
+            assert!(ok && rep.errors.is_empty());
+            std::fs::remove_dir_all(&root).unwrap();
+        }
     }
 }

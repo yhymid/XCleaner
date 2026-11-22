@@ -531,6 +531,14 @@ pub fn clean(layout: &Layout, items: &[Item]) -> std::io::Result<CleanReport> {
                 Err(e) => rep.errors.push(format!("{}: {e}", rel.display())),
             }
         }
+        if item
+            .targets
+            .iter()
+            .all(|(_, a)| matches!(a, Action::Root(_)))
+        {
+            // Logged per task below, with the bytes the root helper reported.
+            continue;
+        }
         let targets: Vec<String> = item
             .targets
             .iter()
@@ -553,16 +561,26 @@ pub fn clean(layout: &Layout, items: &[Item]) -> std::io::Result<CleanReport> {
         if let Some(n) = &o.not_done {
             rep.blocked.push(format!("System: {n}"));
         }
-        log.push(format!(
-            "{ts}\t{}\tzwolniono {}\tbłędy {}\t(sudo)",
-            root_tasks
+        for (t, id) in &root_tasks {
+            let freed: u64 = o
+                .per_task
                 .iter()
-                .map(|(_, id)| id.as_str())
-                .collect::<Vec<_>>()
-                .join(","),
-            crate::format_size(o.freed),
-            o.errors.len()
-        ));
+                .filter(|(a, _)| a == t.arg())
+                .map(|(_, b)| *b)
+                .sum();
+            let prefix = format!("{}:", t.arg());
+            let errors = o.errors.iter().filter(|e| e.starts_with(&prefix)).count();
+            let status = if o.not_done.is_some() {
+                "\tnie wykonano"
+            } else {
+                ""
+            };
+            log.push(format!(
+                "{ts}\t{id}\tzwolniono {}\tbłędy {errors}\t{} (sudo){status}",
+                crate::format_size(freed),
+                t.location()
+            ));
+        }
     }
     for b in &rep.blocked {
         log.push(format!("{ts}\tpominięto\t{b}"));

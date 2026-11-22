@@ -573,6 +573,8 @@ fn self_path() -> Option<PathBuf> {
 #[derive(Debug, Clone, Default)]
 pub struct RootOutcome {
     pub freed: u64,
+    /// Freed bytes per task (task arg, bytes), in report order.
+    pub per_task: Vec<(String, u64)>,
     pub errors: Vec<String>,
     /// The privileged step did not finish (password cancelled, no terminal…).
     pub not_done: Option<String>,
@@ -584,7 +586,11 @@ pub fn parse_report(text: &str) -> RootOutcome {
     for l in text.lines() {
         let mut p = l.splitn(3, '\t');
         match (p.next(), p.next(), p.next()) {
-            (Some("freed"), Some(_), Some(n)) => o.freed += n.parse::<u64>().unwrap_or(0),
+            (Some("freed"), Some(t), Some(n)) => {
+                let b = n.parse::<u64>().unwrap_or(0);
+                o.freed += b;
+                o.per_task.push((t.to_string(), b));
+            }
             (Some("error"), Some(t), Some(m)) => o.errors.push(format!("{t}: {m}")),
             (Some("done"), _, _) => done = true,
             _ => {}
@@ -706,6 +712,7 @@ mod tests {
     fn report_parsing() {
         let o = parse_report("freed\tcoredumps\t100\nerror\tkernel-modules\tx: busy\ndone\n");
         assert_eq!(o.freed, 100);
+        assert_eq!(o.per_task, vec![("coredumps".to_string(), 100)]);
         assert_eq!(o.errors.len(), 1);
         assert!(o.not_done.is_none());
         assert!(parse_report("freed\tcoredumps\t5\n").not_done.is_some());
