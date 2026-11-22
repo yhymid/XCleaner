@@ -332,7 +332,13 @@ pub static RULES: &[Rule] = &[
         category: Category::Trash,
         risk: Risk::Review,
         regen: Regen::Never,
-        targets: &[dir(Data, "Trash/files"), dir(Data, "Trash/info"), dir(Data, "Trash/expunged")],
+        // directorysizes caches the sizes of trashed dirs (Trash spec); stale once emptied.
+        targets: &[
+            dir(Data, "Trash/files"),
+            dir(Data, "Trash/info"),
+            dir(Data, "Trash/expunged"),
+            file(Data, "Trash/directorysizes"),
+        ],
         guards: &[],
     },
     Rule {

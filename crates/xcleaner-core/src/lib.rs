@@ -135,7 +135,13 @@ mod tests {
             .filter(|(_, v)| v.is_none())
             .map(|(k, _)| k.to_string_lossy().to_string())
             .collect();
-        for v in ["LD_LIBRARY_PATH", "GTK_PATH", "GI_TYPELIB_PATH", "APPIMAGE", "APPDIR"] {
+        for v in [
+            "LD_LIBRARY_PATH",
+            "GTK_PATH",
+            "GI_TYPELIB_PATH",
+            "APPIMAGE",
+            "APPDIR",
+        ] {
             assert!(removed.iter().any(|r| r == v), "{v}");
         }
     }
