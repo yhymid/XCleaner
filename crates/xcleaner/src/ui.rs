@@ -161,6 +161,29 @@ fn status_page(icon: &str, title: &str, desc: &str) -> adw::StatusPage {
         .build()
 }
 
+/// Open a directory in the default file manager. A launch context without
+/// the AppImage environment is used: file managers that are not D-Bus
+/// activated (Thunar, Nemo) would otherwise load our bundled GTK modules.
+fn open_in_file_manager(win: &impl IsA<gtk::Widget>, dir: &std::path::Path) {
+    use gtk::gio::prelude::*;
+    let ctx = win.as_ref().display().app_launch_context();
+    for v in xcleaner_core::FOREIGN_ENV {
+        ctx.unsetenv(v);
+    }
+    match xcleaner_core::host_xdg_data_dirs() {
+        Some(d) if d.is_empty() => ctx.unsetenv("XDG_DATA_DIRS"),
+        Some(d) => ctx.setenv("XDG_DATA_DIRS", d),
+        None => {}
+    }
+    let uri = gtk::gio::File::for_path(dir).uri();
+    gtk::gio::AppInfo::launch_default_for_uri_async(
+        &uri,
+        Some(&ctx),
+        None::<&gtk::gio::Cancellable>,
+        |_| {},
+    );
+}
+
 fn busy_page(title: &str) -> gtk::Widget {
     let spinner = gtk::Spinner::new();
     spinner.start();
@@ -508,8 +531,7 @@ fn show_details(state: &Rc<State>, f: &Found) {
                     .map(|p| p.to_path_buf())
                     .unwrap_or_else(|| abs.clone())
             };
-            let launcher = gtk::FileLauncher::new(Some(&gtk::gio::File::for_path(&target)));
-            launcher.launch(Some(&win), None::<&gtk::gio::Cancellable>, |_| {});
+            open_in_file_manager(&win, &target);
         });
         row.add_suffix(&open);
         paths.add(&row);
@@ -768,11 +790,7 @@ fn load_usage(uv: &Rc<UsageView>, rel: std::path::PathBuf) {
                         .map(|p| p.to_path_buf())
                         .unwrap_or_else(|| abs.clone())
                 };
-                gtk::FileLauncher::new(Some(&gtk::gio::File::for_path(&target))).launch(
-                    Some(&win),
-                    None::<&gtk::gio::Cancellable>,
-                    |_| {},
-                );
+                open_in_file_manager(&win, &target);
             });
             row.add_suffix(&open);
             if e.is_dir && !e.is_symlink {

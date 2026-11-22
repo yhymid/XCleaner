@@ -367,7 +367,7 @@ impl Evidence {
                 }
             }
         }
-        let Ok(out) = std::process::Command::new("pacman")
+        let Ok(out) = crate::host_command("pacman")
             .arg("-Fl")
             .args(&pkgs)
             .env("LC_ALL", "C")

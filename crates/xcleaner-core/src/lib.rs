@@ -15,6 +15,74 @@ pub mod scan;
 pub mod usage;
 
 /// True when running with effective UID 0.
+/// Variables the AppImage runtime and its GTK hook set for the bundled
+/// libraries. Host programs (pacman, a terminal, a file manager) must not
+/// inherit them: they would load our libraries or plugins instead of theirs.
+pub const FOREIGN_ENV: &[&str] = &[
+    "LD_LIBRARY_PATH",
+    "LD_PRELOAD",
+    "LD_AUDIT",
+    "GTK_PATH",
+    "GTK_EXE_PREFIX",
+    "GTK_DATA_PREFIX",
+    "GTK_IM_MODULE_FILE",
+    "GIO_MODULE_DIR",
+    "GIO_EXTRA_MODULES",
+    "GI_TYPELIB_PATH",
+    "GDK_PIXBUF_MODULE_FILE",
+    "GDK_PIXBUF_MODULEDIR",
+    "GSETTINGS_SCHEMA_DIR",
+    "PYTHONPATH",
+    "PYTHONHOME",
+    "PERLLIB",
+    "QT_PLUGIN_PATH",
+    "APPDIR",
+    "APPIMAGE",
+    "ARGV0",
+    "OWD",
+    "FUSERMOUNT_PROG",
+];
+
+/// `XDG_DATA_DIRS` without the entries inside the AppImage mount, or None
+/// when nothing needs to change (not an AppImage, or nothing of ours in it).
+/// `Some("")` means the variable should be unset.
+pub fn host_xdg_data_dirs() -> Option<String> {
+    let appdir = std::env::var("APPDIR").ok().filter(|a| !a.is_empty())?;
+    let dirs = std::env::var("XDG_DATA_DIRS").ok()?;
+    Some(strip_appdir(&dirs, &appdir)).filter(|d| *d != dirs)
+}
+
+fn strip_appdir(dirs: &str, appdir: &str) -> String {
+    let appdir = appdir.trim_end_matches('/');
+    dirs.split(':')
+        .filter(|d| !d.is_empty() && *d != appdir && !d.starts_with(&format!("{appdir}/")))
+        .collect::<Vec<_>>()
+        .join(":")
+}
+
+/// Strip the AppImage environment from a command that runs a host program.
+pub fn sanitize_env(cmd: &mut std::process::Command) {
+    for v in FOREIGN_ENV {
+        cmd.env_remove(v);
+    }
+    match host_xdg_data_dirs() {
+        Some(d) if d.is_empty() => {
+            cmd.env_remove("XDG_DATA_DIRS");
+        }
+        Some(d) => {
+            cmd.env("XDG_DATA_DIRS", d);
+        }
+        None => {}
+    }
+}
+
+/// `Command::new` for a host program, with [`sanitize_env`] applied.
+pub fn host_command(program: impl AsRef<std::ffi::OsStr>) -> std::process::Command {
+    let mut c = std::process::Command::new(program);
+    sanitize_env(&mut c);
+    c
+}
+
 pub fn is_root() -> bool {
     // SAFETY: geteuid has no preconditions.
     unsafe { libc::geteuid() == 0 }
@@ -59,6 +127,37 @@ pub fn pl(n: u64, one: &str, few: &str, many: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn host_command_drops_appimage_env() {
+        let c = super::host_command("true");
+        let removed: Vec<_> = c
+            .get_envs()
+            .filter(|(_, v)| v.is_none())
+            .map(|(k, _)| k.to_string_lossy().to_string())
+            .collect();
+        for v in ["LD_LIBRARY_PATH", "GTK_PATH", "GI_TYPELIB_PATH", "APPIMAGE", "APPDIR"] {
+            assert!(removed.iter().any(|r| r == v), "{v}");
+        }
+    }
+
+    #[test]
+    fn appdir_entries_leave_xdg_data_dirs() {
+        let a = "/tmp/.mount_XCleanAB";
+        assert_eq!(
+            super::strip_appdir(
+                "/tmp/.mount_XCleanAB/usr/share:/usr/local/share:/usr/share",
+                a
+            ),
+            "/usr/local/share:/usr/share"
+        );
+        assert_eq!(super::strip_appdir("/tmp/.mount_XCleanAB/usr/share", a), "");
+        // A sibling mount with a common prefix is not ours.
+        assert_eq!(
+            super::strip_appdir("/tmp/.mount_XCleanABC/usr/share", a),
+            "/tmp/.mount_XCleanABC/usr/share"
+        );
+    }
+
     use super::*;
 
     #[test]

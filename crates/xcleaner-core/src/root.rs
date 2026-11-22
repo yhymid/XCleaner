@@ -18,7 +18,7 @@ use std::{
     io::{self, BufRead, Write},
     os::unix::fs::{MetadataExt, OpenOptionsExt},
     path::{Path, PathBuf},
-    process::{Command, Stdio},
+    process::Stdio,
     time::{Duration, Instant},
 };
 
@@ -182,7 +182,7 @@ fn parse_paccache(out: &str) -> (u64, u64) {
 
 /// Package file names a dry run lists with `-v`.
 fn paccache_list(args: &[&str]) -> Vec<String> {
-    let Ok(out) = Command::new(PACCACHE)
+    let Ok(out) = crate::host_command(PACCACHE)
         .arg("-v")
         .args(args)
         .env("LC_ALL", "C")
@@ -215,7 +215,7 @@ fn package_names(files: &[String], max: usize) -> String {
 }
 
 fn paccache_dry(args: &[&str]) -> (u64, u64) {
-    let Ok(out) = Command::new(PACCACHE)
+    let Ok(out) = crate::host_command(PACCACHE)
         .args(args)
         .env("LC_ALL", "C")
         .stdin(Stdio::null())
@@ -461,7 +461,7 @@ fn sync_db_repo(file: &str) -> Option<&str> {
 }
 
 fn configured_repos() -> Option<std::collections::HashSet<String>> {
-    let out = Command::new("/usr/bin/pacman-conf")
+    let out = crate::host_command("/usr/bin/pacman-conf")
         .arg("--repo-list")
         .stdin(Stdio::null())
         .stderr(Stdio::null())
@@ -680,7 +680,7 @@ fn root_paccache(runs: &[&[&str]]) -> (u64, Vec<String>) {
     }
     for args in runs {
         say(&format!("• Cache pacmana: paccache {}…", args.join(" ")));
-        match Command::new(PACCACHE)
+        match crate::host_command(PACCACHE)
             .args(*args)
             .env("LC_ALL", "C")
             .stdin(Stdio::null())
@@ -729,25 +729,6 @@ fn root_modules() -> (u64, Vec<String>) {
 }
 
 // ------------------------------------------------------- GUI-side launch
-
-/// Environment AppImage runtimes inject that host programs must not inherit.
-const FOREIGN_ENV: &[&str] = &[
-    "LD_LIBRARY_PATH",
-    "LD_PRELOAD",
-    "LD_AUDIT",
-    "GTK_PATH",
-    "GTK_EXE_PREFIX",
-    "GTK_DATA_PREFIX",
-    "GIO_MODULE_DIR",
-    "GIO_EXTRA_MODULES",
-    "GDK_PIXBUF_MODULE_FILE",
-    "GDK_PIXBUF_MODULEDIR",
-    "GSETTINGS_SCHEMA_DIR",
-    "PYTHONPATH",
-    "PYTHONHOME",
-    "PERLLIB",
-    "QT_PLUGIN_PATH",
-];
 
 pub const TERMINALS: &[&str] = &[
     "kitty",
@@ -892,14 +873,11 @@ pub fn launch(tasks: &[RootTask]) -> RootOutcome {
     ];
     sudo_args.extend(tasks.iter().map(|t| OsString::from(t.arg())));
     let args = terminal_args(&terminal, "sudo", &sudo_args);
-    let mut cmd = Command::new(&terminal);
+    let mut cmd = crate::host_command(&terminal);
     cmd.args(&args)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
-    for v in FOREIGN_ENV {
-        cmd.env_remove(v);
-    }
     let start = Instant::now();
     match cmd.status() {
         Ok(_) => {}
