@@ -128,26 +128,29 @@ sprawdzamy w VM w v0.3.0.
 
 1. [x] Bezpieczeństwo: stanowe katalogi w `~/.cache` (sesje XFCE, schowek xfce4, obexd, ibus,
    JetBrains Local History, kioexec, evolution, tracker3) — nigdy domyślnie zaznaczone.
-2. [~] Przenośny build (cechy GTK zrobione, kontener czeka na subuid):
+2. [~] Przenośny build (cechy GTK zrobione; kontener czeka na subuid/subgid dla podmana):
    - `gtk4 v4_10` + `adw v1_5`, `adw::Spinner` → `gtk::Spinner`;
    - AppImage budowany w kontenerze `ubuntu:24.04` (glibc 2.39 zamiast 2.44).
-3. [ ] Środowisko AppImage nie przecieka do programów systemu: `GI_TYPELIB_PATH`, `XDG_DATA_DIRS`,
+3. [x] Środowisko AppImage nie przecieka do programów systemu: `GI_TYPELIB_PATH`, `XDG_DATA_DIRS`,
    `APPDIR`, `APPIMAGE`, `ARGV0`, `OWD`, `FUSERMOUNT_PROG`, także przy otwieraniu menedżera plików.
-4. [ ] Terminale: argv dla każdego (gnome-terminal `--wait`, konsole `--separate`, xfce4 `--disable-server`…),
+4. [x] Terminale: argv dla każdego (gnome-terminal `--wait`, konsole `--separate`, xfce4 `--disable-server`…),
    wrapper zapisujący PID i kod wyjścia do raportu, GUI sprawdza, czy PID żyje.
-5. [ ] Eskalacja bez polkit: sudo → doas → `su -c`; jawne `--uid` zamiast `SUDO_UID`.
-6. [ ] Ochrona Steam dla każdego roota (`~/.steam/debian-installation`, Flatpak, Snap); nowe blokady
+5. [x] Eskalacja bez polkit: sudo → doas → `su -c`; jawne `--uid` zamiast `SUDO_UID`.
+6. [x] Ochrona Steam dla każdego roota (`~/.steam/debian-installation`, Flatpak, Snap); nowe blokady
    (`gvfs-metadata`, `nautilus/tags`, akonadi, kactivitymanagerd, evolution).
-7. [ ] Reguły pulpitów: ksycoca/QML/kcache KDE, Snap `~/snap/*/common/.cache`, Flatpak per-app cache
+7. [x] Reguły pulpitów: ksycoca/QML/kcache KDE, Snap `~/snap/*/common/.cache`, Flatpak per-app cache
    z wyjątkami stanowymi, `Trash/directorysizes`.
-8. [ ] Blokady menedżerów pakietów przez `/proc/locks` (dpkg, rpm, xbps, apk), `/run/zypp.pid`.
-9. [ ] Moduł menedżera pakietów (`PackageBackend`) wybierany po istniejących bazach:
+8. [x] Blokady menedżerów pakietów przez `/proc/locks` (dpkg, rpm, xbps, apk), `/run/zypp.pid`.
+9. [x] Moduł menedżera pakietów (`PackageBackend`) wybierany po istniejących bazach:
    dpkg, rpm + dnf4/dnf5, zypper; xbps/apk/Nix tylko „zainstalowane” (bez pozostałości).
-10. [ ] Zadania systemowe: cache apt/dnf/zypper/xbps/apk/eclean, journald, zrotowane logi,
+10. [x] Zadania systemowe: cache apt/dnf/zypper/xbps/apk/eclean, journald, zrotowane logi,
     raporty awarii (apport/ABRT), `flatpak uninstall --unused`, wyłączone rewizje Snap,
     `rpm-ostree cleanup`, stare moduły kernela na innych dystrybucjach.
     Stare kernele tylko po podglądzie, nigdy domyślnie; bez `autoremove`.
-11. [ ] Wydanie: AppImage + `.deb` + `.rpm` + `.pkg.tar.zst` + `SHA256SUMS`.
+11. [ ] Wydanie (czeka na budowanie w kontenerze i test właściciela): AppImage + `.deb` + `.rpm` + `.pkg.tar.zst` + `SHA256SUMS`.
+
+Uwagi do v0.3.0 (VM): dnf nie daje jeszcze pozostałości (historia w SQLite), a doas, `su`,
+apt, dnf, zypper, xbps, apk, Snap i rpm-ostree nie były uruchamiane na prawdziwych systemach.
 
 ## Nigdy
 - Wymazywanie RAM, swapu i wolnego miejsca, „shred”.
