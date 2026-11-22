@@ -683,27 +683,38 @@ fn probe_with(task: RootTask, f: fn() -> Option<(u64, u64, String)>) -> Option<P
     })
 }
 
+/// Read-only look at one task. The match is exhaustive on purpose: a new
+/// task without a probe does not compile (a missing probe once hid six
+/// tasks from the window).
+fn probe_task(task: RootTask) -> Option<Probe> {
+    use crate::{kernels, pkgcache, sysclean};
+    match task {
+        RootTask::Coredumps => probe_coredumps(),
+        RootTask::PacmanCache => probe_pacman_cache(),
+        RootTask::PacmanCacheAll => probe_pacman_cache_all(),
+        RootTask::KernelModules => probe_modules(),
+        RootTask::PacmanDownloads => probe_pacman_downloads(),
+        RootTask::UnusedSyncDbs => probe_unused_sync_dbs(),
+        RootTask::JournalVacuum => probe_with(task, sysclean::probe_journal),
+        RootTask::RotatedLogs => probe_with(task, sysclean::probe_rotated_logs),
+        RootTask::FlatpakUnused => probe_with(task, sysclean::probe_flatpak_unused),
+        RootTask::PkgCache => probe_with(task, pkgcache::probe),
+        RootTask::AptClean => probe_with(task, pkgcache::probe_apt_clean),
+        RootTask::CrashReports => probe_with(task, sysclean::probe_crash_reports),
+        RootTask::SnapDisabled => probe_with(task, sysclean::probe_snap_disabled),
+        RootTask::OstreeCleanup => probe_with(task, sysclean::probe_ostree),
+        RootTask::OldKernels => probe_with(task, kernels::probe),
+    }
+}
+
 /// Read-only look at everything phase 2 could clean.
 pub fn probe_all() -> Vec<Probe> {
     let immutable = immutable_root().is_some();
-    [
-        probe_coredumps(),
-        probe_pacman_cache(),
-        probe_pacman_cache_all(),
-        probe_modules(),
-        probe_pacman_downloads(),
-        probe_unused_sync_dbs(),
-        probe_with(RootTask::JournalVacuum, crate::sysclean::probe_journal),
-        probe_with(RootTask::RotatedLogs, crate::sysclean::probe_rotated_logs),
-        probe_with(
-            RootTask::FlatpakUnused,
-            crate::sysclean::probe_flatpak_unused,
-        ),
-    ]
-    .into_iter()
-    .flatten()
-    .filter(|p| !(immutable && p.task.touches_system_image()))
-    .collect()
+    RootTask::ALL
+        .into_iter()
+        .filter(|t| !(immutable && t.touches_system_image()))
+        .filter_map(probe_task)
+        .collect()
 }
 
 // ------------------------------------------------------ privileged side
